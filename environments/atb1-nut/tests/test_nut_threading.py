@@ -127,6 +127,8 @@ class ConfigTests(unittest.TestCase):
             (lambda d: d["fastener"].__setitem__("ridge_thickness_m", 0.0008), "clearance"),
             # A detection margin below the ridge thickness let pins tunnel on the server.
             (lambda d: d["fastener"].__setitem__("thread_contact_offset_m", 0.00004), "tunnel"),
+            # 24 segments with 3 pins put every pin on a seam at once; it stalled on the server.
+            (lambda d: d["fastener"].__setitem__("segments_per_turn", 24), "seam"),
         ):
             data = yaml.safe_load(yaml.safe_dump(base))
             mutate(data)

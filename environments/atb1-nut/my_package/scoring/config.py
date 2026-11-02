@@ -517,6 +517,10 @@ def _validate_thread(fastener: FastenerSpec) -> None:
         raise ValueError("pin_count must be 3 (three-point support keeps the nut level)")
     if fastener.segments_per_turn < 12:
         raise ValueError("segments_per_turn must be at least 12")
+    if fastener.pin_count > 1 and (fastener.segments_per_turn % fastener.pin_count) == 0:
+        raise ValueError(
+            "segments_per_turn must not be a multiple of pin_count, or every pin crosses a ridge seam at once"
+        )
     span = fastener.pitch_m * (fastener.pin_count - 1) / fastener.pin_count + fastener.pin_thickness_m
     if span >= fastener.nut_height_m / 2.0:
         raise ValueError("the pin stack must fit in the lower half of the nut")

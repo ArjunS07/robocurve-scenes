@@ -20,7 +20,9 @@ fastener:
   pin_thickness_m: 0.0005
   pin_width_m: 0.0012
   pin_count: 3
-  segments_per_turn: 24
+  # 32, not 24: with 24 the three pins (120 deg apart = 8 segments) crossed box seams in
+  # lockstep, and the bc99711 server run stalled at 0.39 turns. 120 deg is 10.67 segments here.
+  segments_per_turn: 32
   # Thread parts only. This is the contact DETECTION margin (restOffset is 0, so it adds no
   # gap). It must exceed the nut's per-step travel: at 0.04 mm the 942249a server run showed
   # pins crossing the 0.5 mm ridge midline in one step and being pushed out downward, so the

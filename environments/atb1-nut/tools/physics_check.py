@@ -77,6 +77,12 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--arena-root", type=Path, default=ARENA)
     parser.add_argument("--turns", type=float, default=3.0, help="Clockwise turns in the advance stage.")
+    parser.add_argument(
+        "--max-torque",
+        type=float,
+        default=0.05,
+        help="Turning-torque cap in N m. The old 2 mN m cap stalled the nut at a seam; a hand or gripper gives far more.",
+    )
     parser.add_argument("--turn-rate", type=float, default=0.5, help="Target turns per second.")
     parser.add_argument("--width", type=int, default=1280)
     parser.add_argument("--height", type=int, default=720)
@@ -293,7 +299,8 @@ def main() -> None:
 
         def torque(state):
             feedforward = 1.5e-4 * math.copysign(1.0, target)
-            return max(-2e-3, min(2e-3, feedforward + 5e-4 * (target - state["wz"])))
+            cap = args.max_torque
+            return max(-cap, min(cap, feedforward + 5e-3 * (target - state["wz"])))
 
         return torque
 
@@ -385,8 +392,17 @@ def main() -> None:
         # Deviation from the ideal helix along the whole run.
         ideal = [before["gap_m"] - f.pitch_m * (s["cw_turns"] - round(before["clockwise_turns"], 4)) for s in samples]
         deviation = max((abs(s["gap_mm"] / 1000 - g) for s, g in zip(samples, ideal)), default=None)
+        # Where the pins sit relative to the ridge seams, so a stall can be traced to geometry.
+        step_deg = 360.0 / f.segments_per_turn
+        pin_phase = [
+            round(((360.0 * state["clockwise_turns"] + 360.0 * k / f.pin_count) % step_deg) / step_deg, 3)
+            for k in range(f.pin_count)
+        ]
         return {
             **summary(state),
+            "max_torque_n_m": args.max_torque,
+            "reached_goal": state["clockwise_turns"] >= goal,
+            "pin_phase_in_segment": pin_phase,
             "drive_mode": drive["mode"],
             "turns": round(turns, 4),
             "descent_mm": round(descent * 1000, 4),
