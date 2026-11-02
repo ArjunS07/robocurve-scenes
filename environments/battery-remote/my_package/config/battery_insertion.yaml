@@ -188,8 +188,10 @@ robot:
   proximal_damping: 40.0
   distal_stiffness: 150.0
   distal_damping: 15.0
-  finger_stiffness: 40.0
-  finger_damping: 2.0
+  # Raised from 40/2: in the reach check one finger stalled ~15 mm open on every close
+  # (40 N/m x 15 mm = 0.6 N) while the other shut. 400/20 matches the nut scene.
+  finger_stiffness: 400.0
+  finger_damping: 20.0
   arm_effort_limit: 30.0
   arm_velocity_limit: 3.0
   finger_effort_limit: 10.0

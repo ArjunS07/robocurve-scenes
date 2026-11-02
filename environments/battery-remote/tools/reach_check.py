@@ -218,73 +218,24 @@ def main() -> None:
         return [round(float(c), 3) for c in approach_local[side]]
 
     def orientation_error(side):
-        """Rotation vector that points the approach axis down and the finger axis along world Y."""
+        """Rotation vector for a pinch across the cell.
+
+        Hard term: the finger axis (gripper local Y) perpendicular to the cell's long axis
+        (world X). Weak term (0.3): approach axis toward straight down. The acfa6ce run showed
+        the arm cannot point straight down at table height from its base, and forcing it pulled
+        the fingertips 27-38 mm off the cell.
+        """
         rot = gripper_rotation(side)
         approach = rot @ approach_local[side]
-        finger = rot[:, 1]  # the YAM finger joints slide along the gripper's local Y (probe)
+        finger = rot[:, 1]
         down = torch.tensor([0.0, 0.0, -1.0], device=device)
-        across = torch.tensor([0.0, 1.0 if float(finger[1]) >= 0 else -1.0, 0.0], device=device)
-        err = torch.linalg.cross(approach, down) + torch.linalg.cross(finger, across)
+        across = finger.clone()
+        across[0] = 0.0
+        across = across / max(float(torch.linalg.norm(across)), 1e-6)
+        err = torch.linalg.cross(finger, across) + 0.3 * torch.linalg.cross(approach, down)
         tilt = math.degrees(math.acos(max(-1.0, min(1.0, float(approach @ down)))))
-        twist = math.degrees(math.acos(max(-1.0, min(1.0, abs(float(finger @ across))))))
+        twist = math.degrees(math.asin(max(-1.0, min(1.0, abs(float(finger[0]))))))
         return err, tilt, twist
-
-    def calibrate(side, delta=0.05):
-        """Measure d(tip)/d(joint) by nudging each arm joint, then pick the matching layout."""
-        base_targets = targets[side].clone()
-        step(int(0.5 / dt))
-        p0 = tip_mid(side).clone()
-        variants = {(b, c): jacobian_variant(side, b, c) for b in (0, 1) for c in (0, 6)}
-        measured = []
-        for j in arm[side]["joints"]:
-            targets[side][0, j] = base_targets[0, j] + delta
-            step(int(0.6 / dt))
-            measured.append(((tip_mid(side) - p0) / delta).clone())
-            targets[side] = base_targets.clone()
-            step(int(0.6 / dt))
-        measured = torch.stack(measured, dim=1)  # 3 x 6
-        measured_jac[side] = measured.clone()
-        scores = {}
-        for key, jac in variants.items():
-            if jac is None:
-                scores[f"body-{key[0]}_cols+{key[1]}"] = None
-                continue
-            err = torch.linalg.norm(jac - measured) / max(float(torch.linalg.norm(measured)), 1e-9)
-            scores[f"body-{key[0]}_cols+{key[1]}"] = round(float(err), 3)
-        valid = {k: v for k, v in scores.items() if v is not None}
-        best = min(valid, key=valid.get)
-        layout[side] = (int(best.split("_")[0].split("-")[1]), int(best.split("+")[1]))
-        return {
-            "jacobian_shape": list(raw_jacobian(side).shape),
-            "relative_error_by_layout": scores,
-            "chosen": best,
-            "measured_column_norms_m_per_rad": [round(float(v), 3) for v in torch.linalg.norm(measured, dim=0)],
-        }
-
-    def tip_mid(side):
-        pos = _tensor(robots[side].data.body_pos_w)[0]
-        return 0.5 * (pos[arm[side]["tips"][0]] + pos[arm[side]["tips"][1]])
-
-    def gripper_axes(side):
-        quat = _tensor(robots[side].data.body_quat_w)[0, arm[side]["gripper"]].cpu().tolist()
-        x, y, z, w = quat  # xyzw, measured on this runtime
-        m = [
-            [1 - 2 * (y * y + z * z), 2 * (x * y - z * w), 2 * (x * z + y * w)],
-            [2 * (x * y + z * w), 1 - 2 * (x * x + z * z), 2 * (y * z - x * w)],
-            [2 * (x * z - y * w), 2 * (y * z + x * w), 1 - 2 * (x * x + y * y)],
-        ]
-        return {axis: [round(m[r][c], 3) for r in range(3)] for c, axis in enumerate("xyz")}
-
-    def at_limit(side):
-        robot = robots[side]
-        limits = _tensor(robot.data.soft_joint_pos_limits)[0]
-        pos = _tensor(robot.data.joint_pos)[0]
-        hits = []
-        for j, name in zip(arm[side]["joints"], bindings[side].arm_joints):
-            lo, hi = float(limits[j, 0]), float(limits[j, 1])
-            if pos[j] <= lo + 0.02 or pos[j] >= hi - 0.02:
-                hits.append(name)
-        return hits
 
     def reach(side, goal, seconds=None, orient=False):
         """Closed-loop DLS IK on the fingertip midpoint with a measured, Broyden-updated Jacobian.
@@ -306,7 +257,7 @@ def main() -> None:
         for _ in range(steps):
             error = goal_t - tip_mid(side)
             if float(torch.linalg.norm(error)) < args.tolerance_m * 0.5 and (
-                not orient or max(orientation_error(side)[1:]) < 5.0
+                not orient or orientation_error(side)[2] < 5.0
             ):
                 break
             if orient:
@@ -344,7 +295,7 @@ def main() -> None:
             ],
             "gripper_axes_world": gripper_axes(side),
             "approach_tilt_from_down_deg": round(orientation_error(side)[1], 1) if side in approach_local else None,
-            "finger_axis_off_world_y_deg": round(orientation_error(side)[2], 1) if side in approach_local else None,
+            "finger_axis_off_perpendicular_deg": round(orientation_error(side)[2], 1) if side in approach_local else None,
             "joint_pos_rad": [round(float(_tensor(robot.data.joint_pos)[0, j]), 3) for j in joints],
         }
 
@@ -427,7 +378,7 @@ def main() -> None:
                 "lifted": rise > 0.03,
                 "gripper_axes_at_grasp": at["gripper_axes_world"],
                 "approach_tilt_from_down_deg": at["approach_tilt_from_down_deg"],
-                "finger_axis_off_world_y_deg": at["finger_axis_off_world_y_deg"],
+                "finger_axis_off_perpendicular_deg": at["finger_axis_off_perpendicular_deg"],
             }
             finger_cmd[side] = cfg.robot.finger_open_m
             step(int(0.5 / dt))
