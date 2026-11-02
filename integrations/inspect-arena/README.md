@@ -9,7 +9,7 @@ Local tests use the exact reported server SDK versions, built from Inspect Robot
 - `inspect-robots 0.0.1.dev1+gc8a821ba7`
 - `inspect-robots-agent 0.29.0`
 
-45 tests pass with fake simulator data, including the real agent with a mocked OpenRouter response and the real Inspect eval/logging loop. No paid calls occur in these tests.
+48 tests pass with fake simulator data, including the real agent with a mocked OpenRouter response and the real Inspect eval/logging loop. No paid calls occur in these tests.
 
 The server has verified the scene/camera bootstrap, Argon communication, raw-joint motion, and MP4 export. The server reach check passed all nine small-motion phases with final position errors below 0.1 mm, and consecutive agent moves now execute. Full piece grasping and reliable visual board interpretation are still unproven. A broken scene still needs to be fixed in that scene. Passing the reach check establishes local tracking, not a successful piece grasp or chess benchmark.
 
@@ -101,6 +101,38 @@ All three RGB images are sent on each policy decision. The agent has a three-cal
 
 Inspect logs, frame sidecars and agent transcripts go into the run's `inspect/` directory. The default upstream policy retains its provider-specific tool metadata between calls.
 
+## Model defaults for every task
+
+Chess, battery insertion and nut threading use the same policy constructor:
+`google/gemini-4-argon`, **high** reasoning effort and cache-friendly routing are
+the defaults. Requests carry OpenRouter's `reasoning: {"effort": "high"}` field.
+`--reasoning-effort low|medium|high` is an explicit override.
+
+Argon supports automatic **implicit** caching, not explicit cache creation.
+The runner keeps a stable `x-session-id` for provider routing and preserves the
+full conversation/image prefix (`image_horizon=None`) rather than evicting old
+camera images every two decisions. New observations are appended. No padding,
+old completion reuse or unsupported explicit cache_control flags are added.
+`--no-cache-friendly` restores the previous two-observation image horizon and
+removes our session hint; it cannot disable provider-side automatic caching.
+Full image history increases uncached input if the provider does not hit a cache.
+
+`openrouter_requests.jsonl` records per-attempt status, elapsed time, requested
+and returned model, reasoning setting, prefix-preservation check, reported usage,
+cache token counts and cost. `openrouter_usage.json` records the aggregates and
+`cache_hit_confirmed`, which becomes true only when returned `cached_tokens > 0`.
+Missing usage is marked unreported, not interpreted as a hit. No API key, headers,
+prompt text, images or model reasoning text are written to these telemetry files.
+Inspect's own policy transcript remains in its normal evaluation log.
+
+Sources: [Google caching](https://ai.google.dev/gemini-api/docs/caching),
+[OpenRouter caching and sessions](https://openrouter.ai/docs/guides/best-practices/prompt-caching),
+[OpenRouter reasoning](https://openrouter.ai/docs/guides/best-practices/reasoning-tokens).
+
+The first successful chess run used **low** effort and the previous two-image
+horizon. Changing defaults does not relabel that historical result. See the
+[chess task README](../../environments/chess-mate/README.md) for its evidence.
+
 ## Bounded recovery from provider timeouts
 
 `--request-attempts 3` (the default) uses the installed Inspect SDK's native retry
@@ -110,7 +142,7 @@ starts at 2 seconds (then 4); a provider Retry-After header takes precedence.
 `--retry-backoff-seconds` changes the base delay. Authentication and other
 non-transient 4xx errors fail immediately.
 
-The installed Chat client retains its 120-second HTTP timeout settings. There is
+The transport sets a 300-second HTTP read timeout by default (`--request-read-timeout` changes it). There is
 no overall wall-clock deadline. Retries resend the same model request while
 simulation is paused; they do not restart the environment, repeat a previous
 robot move or advance physics. Only a successfully received action chunk is
