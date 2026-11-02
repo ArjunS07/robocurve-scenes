@@ -70,40 +70,65 @@ def quaternion_static() -> dict:
     return out
 
 
-def table_info() -> dict:
-    out: dict = {"usd_candidates": []}
-    for path in ARENA.rglob("*.py"):
-        text = path.read_text(errors="ignore")
-        if "maple_table_robolab" in text:
-            for line in text.splitlines():
-                if "usd" in line.lower() and ("maple" in line.lower() or "table" in line.lower()):
-                    out["usd_candidates"].append(f"{path}: {line.strip()[:200]}")
-    try:
-        from pxr import Usd, UsdGeom
+def _maple_class():
+    """The background_library class registered as maple_table_robolab, plus that module."""
+    import inspect
 
-        usd_paths = set()
-        for item in out["usd_candidates"]:
-            usd_paths.update(re.findall(r"[\"']([^\"']+\.usd[a-z]?)[\"']", item))
-        boxes = {}
-        for usd in sorted(usd_paths):
-            if "{" in usd:
-                boxes[usd] = "templated path; resolve manually"
-                continue
-            stage = Usd.Stage.Open(usd)
-            if stage is None:
-                boxes[usd] = "could not open"
-                continue
-            cache = UsdGeom.BBoxCache(Usd.TimeCode.Default(), ["default", "render"])
-            box = cache.ComputeWorldBound(stage.GetDefaultPrim() or stage.GetPseudoRoot()).ComputeAlignedRange()
-            boxes[usd] = {
-                "min": list(box.GetMin()),
-                "max": list(box.GetMax()),
-                "metersPerUnit": UsdGeom.GetStageMetersPerUnit(stage),
-                "upAxis": str(UsdGeom.GetStageUpAxis(stage)),
-            }
-        out["bounds"] = boxes
-    except ImportError:
-        out["bounds"] = "pxr not importable outside Kit; rerun with --sim"
+    import isaaclab_arena.assets.background_library as library
+
+    classes = [cls for _name, cls in inspect.getmembers(library, inspect.isclass) if cls.__module__ == library.__name__]
+    for cls in classes:
+        if getattr(cls, "name", None) == "maple_table_robolab":
+            return library, cls
+    # The registry name may be set in __init__ rather than on the class.
+    for cls in classes:
+        if "maple_table" in inspect.getsource(cls):
+            return library, cls
+    raise LookupError("no class with name == 'maple_table_robolab' in background_library")
+
+
+def _usd_bounds(usd: str) -> dict:
+    from pxr import Usd, UsdGeom, UsdPhysics
+
+    stage = Usd.Stage.Open(usd)
+    if stage is None:
+        return {"error": f"could not open {usd}"}
+    root = stage.GetDefaultPrim() or stage.GetPseudoRoot()
+    cache = UsdGeom.BBoxCache(Usd.TimeCode.Default(), ["default", "render"])
+    box = cache.ComputeWorldBound(root).ComputeAlignedRange()
+    # Collision geometry decides where objects rest, so report it separately from the visual bound.
+    collision_top = None
+    for prim in stage.Traverse():
+        if prim.HasAPI(UsdPhysics.CollisionAPI) and prim.IsA(UsdGeom.Imageable):
+            top = cache.ComputeWorldBound(prim).ComputeAlignedRange().GetMax()[2]
+            collision_top = top if collision_top is None else max(collision_top, top)
+    return {
+        "default_prim": str(root.GetPath()),
+        "min": list(box.GetMin()),
+        "max": list(box.GetMax()),
+        "collision_max_z": collision_top,
+        "metersPerUnit": UsdGeom.GetStageMetersPerUnit(stage),
+        "upAxis": str(UsdGeom.GetStageUpAxis(stage)),
+    }
+
+
+def table_info() -> dict:
+    """Resolve the maple table's real USD path through Arena itself. Needs Kit (--sim)."""
+    import inspect
+
+    try:
+        library, cls = _maple_class()
+    except ImportError as exc:
+        return {"error": f"background_library needs Kit; rerun with --sim ({exc})"}
+    out: dict = {"class": f"{cls.__module__}.{cls.__qualname__}", "source": inspect.getsource(cls)[:1500]}
+    for attr in ("usd_path", "scale", "initial_pose", "object_type"):
+        out[attr] = repr(getattr(cls, attr, None))
+    usd = getattr(cls, "usd_path", None)
+    if isinstance(usd, str):
+        out["bounds_in_asset_frame"] = _usd_bounds(usd)
+    out["nucleus_dirs"] = {
+        key: str(value) for key, value in vars(library).items() if key.endswith("NUCLEUS_DIR")
+    }
     return out
 
 
