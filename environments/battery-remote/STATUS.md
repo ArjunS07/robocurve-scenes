@@ -17,7 +17,8 @@ Isaac Lab 17.0.2 / Kit 110.3 on the L40S, via `environments/tools/probe_runtime.
   - **Insertion and retention in both slots**: a cell lowered into either slot and released ends seated (axial offset 0.00 mm, spring contact, 1.46 mm compression against the 1.5 mm design preload) and stays seated through a 0.05 m/s lateral kick.
   - **Polarity**: a reversed cell sits in the slot touching the spring but is not counted as seated.
   - **Open top**: a 0.6 m/s upward pull lifts the cell out, as expected with the cover removed.
-  - **Not yet fixed there**: before insertion, battery_b rolled ~20 mm in 2 s on the bare table (still accelerating, so that patch of the table collider is not level). The cells now start on flat 1 mm static mats with light rolling damping; **not yet re-run.**
+  - **Start pose**: on the bare table battery_b rolled ~20 mm in 2 s and was still accelerating (that patch of the table collider is not level). With the flat 1 mm start mats and angular damping 0.5 (`226053a`), both cells drift 1.4 mm while settling onto the mat and come to 0.7 mm/s, inside the 3 mm mark margin.
+- `launch_battery_insertion.py` at `278daba`: the Arena runner builds the scene and completes 50 zero-action steps with no false failure (`num_episodes: 0`, insertion score 0 as expected with no motion).
 
 ## Code-checked (not physics)
 
