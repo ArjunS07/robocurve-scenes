@@ -7,6 +7,7 @@ from pathlib import Path
 import sys
 from .adapter import ArenaEmbodiment
 from .contract import scene_arms
+from .perception import camera_names, configure_cameras, workspace_description
 
 SCENES = {
     'chess-mate': ('chess_environment:ChessMateEnvironment', 'chess_mate', 'chess_config'),
@@ -150,6 +151,7 @@ def open_scene(args, output):
                 geometry.GENERATED_DIR = output / 'generated'
             builder = get_arena_builder_from_cli(native)
             env_cfg, env_kwargs = builder.compose_manager_cfg()
+            camera_report=configure_cameras(env_cfg,args.scene,getattr(args,'camera_resolution',None))
             arms=scene_arms(args.scene,builder.arena_env.task.cfg)
             profile=getattr(args,'servo_profile','auto')
             if profile=='auto': profile='tracking' if getattr(args,'control_interface','eef_pos')=='eef_pos' else 'scene'
@@ -162,13 +164,11 @@ def open_scene(args, output):
                 base = env.unwrapped
                 base._robocurve_inspect_episode_budget = episode_budget
                 base._robocurve_inspect_servo_report = servo_report
+                base._robocurve_inspect_camera_report = camera_report
                 task = builder.arena_env.task
                 cfg = task.cfg
                 base._robocurve_inspect_task_cfg = cfg
-                if args.scene == 'atb1-nut':
-                    sensors = ('overhead', 'front', 'side')
-                else:
-                    sensors = ('overhead_cam', 'front_cam', 'side_cam')
+                sensors = camera_names(args.scene)
                 cameras = {}
                 for label, sensor_name in zip(('overhead', 'front', 'side'), sensors):
                     sensor = base.scene[sensor_name]
@@ -176,14 +176,7 @@ def open_scene(args, output):
                 arms=scene_arms(args.scene,cfg)
                 if getattr(args,'control_interface','eef_pos')=='eef_pos':
                     from .cartesian import CartesianEmbodiment
-                    rig_docs=''
-                    table=getattr(cfg,'table',None)
-                    if table is not None:
-                        rig_docs=f'Table surface world Z={table.top_z_m} m. '
-                    board=getattr(cfg,'board_pose',None)
-                    if board is not None:
-                        rig_docs+=f'Board center world XYZ={tuple(board.position_xyz)} m. '
-                        rig_docs+='White home rank is toward world -X; files a to h run toward world -Y. '
+                    rig_docs=workspace_description(cfg)
                     adapter=CartesianEmbodiment(env,arms,cameras,report_reader(args.scene),rig_docs=rig_docs)
                     adapter.control_report_path=output/'control_setup.json'
                 else:

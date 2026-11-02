@@ -9,9 +9,9 @@ Local tests use the exact reported server SDK versions, built from Inspect Robot
 - `inspect-robots 0.0.1.dev1+gc8a821ba7`
 - `inspect-robots-agent 0.29.0`
 
-36 tests pass with fake simulator data, including the real agent with a mocked OpenRouter response and the real Inspect eval/logging loop. No paid calls occur in these tests.
+42 tests pass with fake simulator data, including the real agent with a mocked OpenRouter response and the real Inspect eval/logging loop. No paid calls occur in these tests.
 
-The server has verified the scene/camera bootstrap, Argon communication, raw-joint motion, and MP4 export. **The new Cartesian control path and live CAD/Jacobian calibration still require the server reach check below.** A broken scene still needs to be fixed in that scene. Passing the reach check establishes local tracking, not a successful piece grasp or chess benchmark.
+The server has verified the scene/camera bootstrap, Argon communication, raw-joint motion, and MP4 export. The server reach check passed all nine small-motion phases with final position errors below 0.1 mm, and consecutive agent moves now execute. Full piece grasping and reliable visual board interpretation are still unproven. A broken scene still needs to be fixed in that scene. Passing the reach check establishes local tracking, not a successful piece grasp or chess benchmark.
 
 ## Cartesian control and the first server check
 
@@ -36,6 +36,23 @@ Cartesian runs default to the run-local `tracking` servo profile: arm stiffness/
 The measured `eef_state` drives Cartesian interpolation. Observations also retain joint angles, both world base transforms, world grasp positions, and tool-axis directions. Native Arena action mapping, cameras, scoring and MP4 recording are retained. `last_task_result.json` saves the last task score and hard-failure reasons; terminal reasons are printed too.
 
 For diagnostics only, `--control-interface joints` retains the earlier raw joint interface. Cartesian controls have per-step limits of 2 mm, 0.04 rad and 0.05 opening, and the IK joint command changes are limited to 0.025 rad. The IK correction updates a persistent joint command, preserving the PD offset required to hold against gravity rather than re-seeding from a sagging measured pose each step. These are local servo limits, not arm/table collision planning. Unreachable targets can leave a measurable residual and must not be reported as reached.
+
+## Clearer chess observations for a diagnostic retry
+
+Pass `--camera-resolution 512` to render all three policy sensor views at 512x512.
+This updates the composed sensor configuration for that process before cameras
+are created; it does not upscale a 256x256 image or modify scene YAML. The
+camera pose, lens and field of view remain unchanged. Original/effective sizes
+are recorded in `run.json`. The default without this flag preserves scene sizes.
+Higher resolution increases camera cost, raw-frame storage and model image input.
+
+The EEF policy docs now supply configured square size, board pose and (for an
+identity-oriented board) the file/rank-to-world coordinate formula. This is public
+workspace calibration: no piece identities, FEN or mating move are supplied.
+It addresses guessed scale and orientation; it does not establish that the model
+can reliably recognize pieces or complete a grasp. Review a `--mode capture
+--camera-resolution 512` run, then use a short agent attempt with e.g.
+`--camera-resolution 512 --max-llm-calls 12` before another 200-call attempt.
 
 ## First run: real camera capture, no model calls
 

@@ -40,6 +40,8 @@ def main():
     parser.add_argument('--arena-root', type=Path, default=Path('/home/ubuntu/workspace/IsaacLab-Arena'))
     parser.add_argument('--scene-config', type=Path)
     parser.add_argument('--device', default='cuda:0')
+    parser.add_argument('--camera-resolution', type=int, choices=(256,512,768,1024),
+                        help='Run-local square RGB resolution for all three policy cameras')
     parser.add_argument('--stream', action='store_true')
     parser.add_argument('--public-ip', default=os.environ.get('PUBLIC_IP'))
     parser.add_argument('--output', type=Path)
@@ -120,6 +122,7 @@ def main():
         provenance.update(adapter.base._robocurve_inspect_episode_budget)
         provenance['control_hz'] = adapter.info.control_hz
         provenance['servo_settings'] = adapter.base._robocurve_inspect_servo_report
+        provenance['camera_settings'] = adapter.base._robocurve_inspect_camera_report
         max_episode = max(1, math.ceil(float(adapter.base.cfg.episode_length_s) * adapter.info.control_hz))
         provenance['effective_max_environment_steps'] = min(args.steps, max_episode)
         (output / 'run.json').write_text(json.dumps(provenance, indent=2) + '\n')
