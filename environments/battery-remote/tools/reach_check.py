@@ -229,12 +229,12 @@ def main() -> None:
         approach = rot @ approach_local[side]
         finger = rot[:, 1]
         down = torch.tensor([0.0, 0.0, -1.0], device=device)
-        across = finger.clone()
-        across[0] = 0.0
-        across = across / max(float(torch.linalg.norm(across)), 1e-6)
+        # Fingers must close horizontally across the cell: along world +-Y. Only being
+        # perpendicular to X let them close vertically, one above the cell and one under it.
+        across = torch.tensor([0.0, 1.0 if float(finger[1]) >= 0 else -1.0, 0.0], device=device)
         err = torch.linalg.cross(finger, across) + 0.3 * torch.linalg.cross(approach, down)
         tilt = math.degrees(math.acos(max(-1.0, min(1.0, float(approach @ down)))))
-        twist = math.degrees(math.asin(max(-1.0, min(1.0, abs(float(finger[0]))))))
+        twist = math.degrees(math.acos(max(-1.0, min(1.0, abs(float(finger @ across))))))
         return err, tilt, twist
 
     def calibrate(side, delta=0.05):
@@ -269,9 +269,52 @@ def main() -> None:
             "measured_column_norms_m_per_rad": [round(float(v), 3) for v in torch.linalg.norm(measured, dim=0)],
         }
 
-    def tip_mid(side):
+    def quat_to_rot(q):
+        x, y, z, w = [float(v) for v in q]  # xyzw, measured on this runtime
+        return torch.tensor(
+            [
+                [1 - 2 * (y * y + z * z), 2 * (x * y - z * w), 2 * (x * z + y * w)],
+                [2 * (x * y + z * w), 1 - 2 * (x * x + z * z), 2 * (y * z - x * w)],
+                [2 * (x * z - y * w), 2 * (y * z + x * w), 1 - 2 * (x * x + y * y)],
+            ],
+            device=device,
+        )
+
+    pad_local = {}
+
+    def measure_pads(side):
+        """Centre of each finger's geometry in that finger body's own frame.
+
+        The finger bodies' origins are not at the pads: closed fingers' origins were 72 mm
+        apart (b01e670). Local bounds do not depend on the stale world transforms USD keeps
+        for articulation links, so this is valid at any time.
+        """
+        from pxr import Usd, UsdGeom
+
+        stage = sim.stage if hasattr(sim, "stage") else sim_utils.get_current_stage()
+        cache = UsdGeom.BBoxCache(Usd.TimeCode.Default(), ["default", "render", "guide"])
+        root = stage.GetPrimAtPath("/World/RobotLeft" if side == "left" else "/World/RobotRight")
+        centres = []
+        for tip in ("tip_left", "tip_right"):
+            prim = next(p for p in Usd.PrimRange(root, Usd.TraverseInstanceProxies()) if p.GetName() == tip)
+            rng = cache.ComputeRelativeBound(prim, prim).ComputeAlignedRange()
+            centres.append(torch.tensor([float(v) for v in rng.GetMidpoint()], device=device))
+        pad_local[side] = centres
+        return [[round(1000 * float(v), 1) for v in c] for c in centres]
+
+    def pad_centres(side):
         pos = _tensor(robots[side].data.body_pos_w)[0]
-        return 0.5 * (pos[arm[side]["tips"][0]] + pos[arm[side]["tips"][1]])
+        quat = _tensor(robots[side].data.body_quat_w)[0]
+        out = []
+        for k, body in enumerate(arm[side]["tips"]):
+            local = pad_local[side][k] if side in pad_local else torch.zeros(3, device=device)
+            out.append(pos[body] + quat_to_rot(quat[body].tolist()) @ local)
+        return out
+
+    def tip_mid(side):
+        """Grasp point: midpoint of the two finger pads (geometry centres), not the body origins."""
+        left_pad, right_pad = pad_centres(side)
+        return 0.5 * (left_pad + right_pad)
 
     def gripper_axes(side):
         quat = _tensor(robots[side].data.body_quat_w)[0, arm[side]["gripper"]].cpu().tolist()
@@ -352,7 +395,7 @@ def main() -> None:
             ],
             "gripper_axes_world": gripper_axes(side),
             "approach_tilt_from_down_deg": round(orientation_error(side)[1], 1) if side in approach_local else None,
-            "finger_axis_off_perpendicular_deg": round(orientation_error(side)[2], 1) if side in approach_local else None,
+            "finger_axis_off_world_y_deg": round(orientation_error(side)[2], 1) if side in approach_local else None,
             "joint_pos_rad": [round(float(_tensor(robot.data.joint_pos)[0, j]), 3) for j in joints],
         }
 
@@ -365,6 +408,7 @@ def main() -> None:
         step(int(1.5 / dt))
 
     step(int(1.0 / dt))
+    report["finger_pad_centres_local_mm"] = {side: _stage({}, side, lambda side=side: measure_pads(side)) for side in robots}
     report["jacobian_calibration"] = {}
     for side in robots:
         # Fixed-base convention as the fallback if calibration itself fails.
@@ -424,11 +468,11 @@ def main() -> None:
             rng = cache.ComputeWorldBound(prim).ComputeAlignedRange()
             return {"min_mm": [round(1000 * v, 1) for v in rng.GetMin()], "max_mm": [round(1000 * v, 1) for v in rng.GetMax()]}
 
-        out = {}
-        for tip in ("tip_left", "tip_right"):
-            prim = next((p for p in Usd.PrimRange(robot_root, Usd.TraverseInstanceProxies()) if p.GetName() == tip), None)
-            out[tip] = box(prim) if prim is not None else "not found"
-        out["cell"] = box(stage.GetPrimAtPath(f"/World/{cell_name}"))
+        # USD keeps articulation links at their spawn pose (b01e670 showed the finger boxes at
+        # home), so report the pads from the live body poses instead.
+        out = {f"{tip}_pad_mm": [round(1000 * float(v), 1) for v in pad] for tip, pad in zip(("tip_left", "tip_right"), pad_centres(side))}
+        cell_pos = _tensor(cells[cell_name].data.root_pos_w)[0]
+        out["cell_centre_mm"] = [round(1000 * float(v), 1) for v in cell_pos]
         pos = _tensor(robots[side].data.body_pos_w)[0]
         out["tip_body_origins_mm"] = [[round(1000 * float(v), 1) for v in pos[i]] for i in arm[side]["tips"]]
         out["table_top_mm"] = round(1000 * cfg.table.top_z_m, 1)
@@ -447,6 +491,8 @@ def main() -> None:
             finger_cmd[side] = cfg.robot.finger_closed_m
             step(int(1.0 / dt))
             fingers = [round(float(_tensor(robots[side].data.joint_pos)[0, j]), 4) for j in arm[side]["fingers"]]
+            pads_after = pad_centres(side)
+            pad_gap_mm = round(1000 * float(torch.linalg.norm(pads_after[0] - pads_after[1])), 1)
             start_z = float(_tensor(cell.data.root_pos_w)[0, 2])
             lift = reach(side, (x, y, z + 0.05), orient=True)
             end = _tensor(cell.data.root_pos_w)[0].cpu().tolist()
@@ -462,8 +508,10 @@ def main() -> None:
                 "lifted": rise > 0.03,
                 "gripper_axes_at_grasp": at["gripper_axes_world"],
                 "before_close": boxes,
+                "pad_gap_after_close_mm": pad_gap_mm,
+                "cell_diameter_mm": round(1000 * cfg.battery.diameter_m, 1),
                 "approach_tilt_from_down_deg": at["approach_tilt_from_down_deg"],
-                "finger_axis_off_perpendicular_deg": at["finger_axis_off_perpendicular_deg"],
+                "finger_axis_off_world_y_deg": at["finger_axis_off_world_y_deg"],
             }
             finger_cmd[side] = cfg.robot.finger_open_m
             step(int(0.5 / dt))
