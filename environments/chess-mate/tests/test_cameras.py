@@ -1,8 +1,9 @@
 """Check physical camera axes and projected task coverage without Isaac Sim."""
 import math
+from dataclasses import replace
 import unittest
 
-from my_package.scoring.config import default_config_path, load_config
+from my_package.scoring.config import CameraSpec, _build, default_config_path, load_config, validate
 from my_package.scoring.math3d import (
     dot, look_at_ros_xyzw, normalize, quat_inv, rotate, sub,
 )
@@ -74,3 +75,12 @@ class CameraTests(unittest.TestCase):
         z = cfg.table.top_z_m + cfg.board.thickness_m
         self.assertGreater(project(camera, (cx - .1, cy, z))[1],
                            project(camera, (cx + .1, cy, z))[1])
+
+    def test_explicit_up_is_validated_and_default_up_remains_compatible(self):
+        cfg = load_config(default_config_path())
+        camera = cfg.cameras[1]
+        data = {key: value for key, value in vars(camera).items() if key != 'up_xyz'}
+        self.assertEqual(_build(CameraSpec, data).up_xyz, (0., 0., 1.))
+        wrong_roll = replace(cfg.cameras[0], up_xyz=(0., 0., 1.))
+        with self.assertRaisesRegex(ValueError, 'overhead_cam rotation'):
+            validate(replace(cfg, cameras=(wrong_roll, *cfg.cameras[1:])))

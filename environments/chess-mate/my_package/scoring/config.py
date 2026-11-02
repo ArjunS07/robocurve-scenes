@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, fields, is_dataclass, replace
+from dataclasses import MISSING, dataclass, fields, is_dataclass, replace
 from pathlib import Path
 from typing import Any, get_args, get_origin, get_type_hints
 
@@ -89,6 +89,7 @@ class CameraSpec:
     focus_distance: float
     horizontal_aperture: float
     vertical_aperture: float
+    up_xyz: tuple[float, float, float] = (0.0, 0.0, 1.0)
 
 
 @dataclass(frozen=True)
@@ -179,10 +180,11 @@ def _build(cls: type, data: dict) -> Any:
     unknown = set(data) - set(hints)
     if unknown:
         raise ValueError(f"{cls.__name__} has unknown keys: {sorted(unknown)}")
-    missing = [name for name in hints if name not in data]
+    missing = [field.name for field in fields(cls) if field.name not in data
+               and field.default is MISSING and field.default_factory is MISSING]
     if missing:
         raise ValueError(f"{cls.__name__} is missing keys: {missing}")
-    return cls(**{name: _convert(hints[name], data[name]) for name in hints})
+    return cls(**{name: _convert(hints[name], data[name]) for name in hints if name in data})
 
 
 def load_config(path: str | Path, *, validate_config: bool = True) -> ChessMateConfig:
@@ -243,7 +245,7 @@ def validate(cfg: ChessMateConfig) -> None:
     from my_package.scoring.math3d import look_at_ros_xyzw
 
     for camera in cfg.cameras:
-        expected = look_at_ros_xyzw(camera.eye_xyz, camera.target_xyz)
+        expected = look_at_ros_xyzw(camera.eye_xyz, camera.target_xyz, camera.up_xyz)
         same = sum((a - b) ** 2 for a, b in zip(camera.rotation_xyzw, expected))
         flipped = sum((a + b) ** 2 for a, b in zip(camera.rotation_xyzw, expected))
         if min(same, flipped) > 1e-12:

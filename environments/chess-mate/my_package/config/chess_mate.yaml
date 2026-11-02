@@ -108,12 +108,15 @@ board_pose:
 # next server capture; no images are rotated or cropped in the Inspect adapter.
 cameras:
   - name: overhead_cam
-    eye_xyz: [0.6, 0.0, 0.603]
+    eye_xyz: [1.2, 0.0, 0.903]
     target_xyz: [0.55, 0.0, 0.023]
-    rotation_xyzw: [-0.7064532484487099, 0.70645324844871, 0.03039420596536741, -0.030394205965367415]
+    # Elevated view from the far side: home grippers project toward the near edge.
+    # Keep White at the bottom even though the camera is no longer nearly vertical.
+    up_xyz: [1.0, 0.0, 0.0]
+    rotation_xyzw: [-0.6716334681908381, 0.671633468190838, 0.22115262694787632, -0.22115262694787632]
     width: 256
     height: 256
-    focal_length: 7.3
+    focal_length: 13.0
     focus_distance: 40.0
     horizontal_aperture: 5.376
     vertical_aperture: 5.376
