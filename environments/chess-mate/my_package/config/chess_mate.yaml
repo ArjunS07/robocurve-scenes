@@ -103,37 +103,40 @@ board_pose:
   position_xyz: [0.55, 0.0, 0.007]
   rotation_xyzw: [0.0, 0.0, 0.0, 1.0]
 
+# Policy sensor views: upright ROS optical axes, square pixels, board-focused lenses.
+# Poses use world coordinates and the measured tabletop. Framing awaits the
+# next server capture; no images are rotated or cropped in the Inspect adapter.
 cameras:
   - name: overhead_cam
-    eye_xyz: [0.55, 0.0, 0.603]
-    target_xyz: [0.55, 0.0, 0.013]
-    rotation_xyzw: [1.0, 0.0, 0.0, 0.0]
+    eye_xyz: [0.6, 0.0, 0.603]
+    target_xyz: [0.55, 0.0, 0.023]
+    rotation_xyzw: [-0.7064532484487099, 0.70645324844871, 0.03039420596536741, -0.030394205965367415]
     width: 256
     height: 256
-    focal_length: 2.1
+    focal_length: 7.3
     focus_distance: 40.0
     horizontal_aperture: 5.376
-    vertical_aperture: 3.024
+    vertical_aperture: 5.376
   - name: front_cam
-    eye_xyz: [1.12, 0.0, 0.303]
-    target_xyz: [0.55, 0.0, 0.033]
-    rotation_xyzw: [-0.5975128334895923, 0.5975128334895922, 0.3781248653754985, -0.3781248653754985]
+    eye_xyz: [1.0, 0.0, 0.383]
+    target_xyz: [0.55, 0.0, 0.043]
+    rotation_xyzw: [0.6330152227999126, 0.6330152227999126, -0.3151058991887917, -0.3151058991887917]
     width: 256
     height: 256
-    focal_length: 2.1
+    focal_length: 7.0
     focus_distance: 40.0
     horizontal_aperture: 5.376
-    vertical_aperture: 3.024
+    vertical_aperture: 5.376
   - name: side_cam
-    eye_xyz: [0.55, -0.70, 0.253]
-    target_xyz: [0.55, 0.0, 0.033]
-    rotation_xyzw: [0.0, 0.8061720029684715, 0.5916812500238644, 0.0]
+    eye_xyz: [0.55, -0.56, 0.363]
+    target_xyz: [0.55, 0.0, 0.043]
+    rotation_xyzw: [-0.8649100931185951, 0.0, -0.0, 0.5019268181932335]
     width: 256
     height: 256
-    focal_length: 2.1
+    focal_length: 7.5
     focus_distance: 40.0
     horizontal_aperture: 5.376
-    vertical_aperture: 3.024
+    vertical_aperture: 5.376
 
 robot:
   usda_path: /home/ubuntu/workspace/robocurve/assets/yam/yam_source_resolved/yam_source_resolved.usda

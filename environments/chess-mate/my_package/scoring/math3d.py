@@ -141,14 +141,17 @@ def look_at_ros_xyzw(
 ) -> tuple[float, float, float, float]:
     """ROS optical pose: camera +Z looks at the target, +X is right, +Y is down.
 
-    Provisional aiming helper. The resulting quaternion is what the saved camera
-    config is checked against; it is not a calibrated extrinsics solution.
+    World up projects toward image up, including oblique views. When looking
+    nearly along world up, use +X as the image-up reference instead: on the
+    overhead chess view this puts White's home rank (-X) at the bottom.
+    These are configured views, not calibrated physical-camera extrinsics.
     """
     forward = normalize(sub(target, eye))
-    if abs(dot(forward, world_up)) > 0.99:
-        right = (1.0, 0.0, 0.0)
-    else:
-        right = normalize(cross(world_up, forward))
+    up_hint = normalize(world_up)
+    if abs(dot(forward, up_hint)) > 0.99:
+        # Avoid a degenerate cross product without sacrificing exact aim.
+        up_hint = (1.0, 0.0, 0.0) if abs(forward[0]) < 0.9 else (0.0, 1.0, 0.0)
+    right = normalize(cross(forward, up_hint))
     down = cross(forward, right)
     return quat_from_axes(right, down, forward)
 
