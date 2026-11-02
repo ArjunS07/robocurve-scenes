@@ -348,8 +348,8 @@ def main() -> None:
         result = {}
         for name in robots:
             root = stage.GetPrimAtPath(f"/World/{name}")
-            base = next((p for p in Usd.PrimRange(root) if p.GetName() == "base" and p.HasAPI(UsdPhysics.RigidBodyAPI)), None)
-            colliders = [p for p in Usd.PrimRange(root) if p.HasAPI(UsdPhysics.CollisionAPI)]
+            base = next((p for p in Usd.PrimRange(root, Usd.TraverseInstanceProxies()) if p.GetName() == "base" and p.HasAPI(UsdPhysics.RigidBodyAPI)), None)
+            colliders = [p for p in Usd.PrimRange(root, Usd.TraverseInstanceProxies()) if p.HasAPI(UsdPhysics.CollisionAPI)]
             whole = cache.ComputeWorldBound(root).ComputeAlignedRange()
             entry = {
                 "collider_count": len(colliders),
@@ -357,7 +357,7 @@ def main() -> None:
             }
             if base is not None:
                 total = None
-                for prim in Usd.PrimRange(base):
+                for prim in Usd.PrimRange(base, Usd.TraverseInstanceProxies()):
                     if prim.IsA(UsdGeom.Gprim) and owner(prim) == base:
                         part = cache.ComputeWorldBound(prim).ComputeAlignedRange()
                         if not part.IsEmpty():
@@ -428,7 +428,7 @@ def main() -> None:
             insert(name, slot, slot.required_axis_xyz[0])
         shown, hidden = 0, 0
         visual_names = {"shell", "positive_contacts", "polarity_marks", "ir_window", "coil", "positive_nub"}
-        for prim in Usd.PrimRange(stage.GetPrimAtPath("/World")):
+        for prim in Usd.PrimRange(stage.GetPrimAtPath("/World"), Usd.TraverseInstanceProxies()):
             path = str(prim.GetPath())
             if not (path.startswith("/World/remote") or path.startswith("/World/battery")):
                 continue

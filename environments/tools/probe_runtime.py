@@ -159,7 +159,7 @@ def _yam_bounds(stage) -> dict:
             entry["robot"] = {"min": [round(v, 5) for v in whole.GetMin()], "max": [round(v, 5) for v in whole.GetMax()]}
         if base.IsValid():
             total = None
-            for prim in Usd.PrimRange(base):
+            for prim in Usd.PrimRange(base, Usd.TraverseInstanceProxies()):
                 if not prim.IsA(UsdGeom.Gprim) or owner(prim) != base:
                     continue
                 part = cache.ComputeWorldBound(prim).ComputeAlignedRange()

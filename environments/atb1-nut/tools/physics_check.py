@@ -460,7 +460,7 @@ def main() -> None:
         place(travel * 0.5, 360.0 * 0.5 * f.turns)
         shown, hidden = 0, 0
         for root in ("/World/fixture", "/World/nut"):
-            for prim in Usd.PrimRange(stage.GetPrimAtPath(root)):
+            for prim in Usd.PrimRange(stage.GetPrimAtPath(root), Usd.TraverseInstanceProxies()):
                 if not prim.IsA(UsdGeom.Gprim):
                     continue
                 if prim.HasAPI(UsdPhysics.CollisionAPI):

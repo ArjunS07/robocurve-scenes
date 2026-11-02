@@ -200,17 +200,33 @@ def add_link_colliders(root_prim) -> dict:
     """
     from pxr import Usd, UsdGeom, UsdPhysics
 
+    # The link visuals are instanced, and a plain PrimRange does not enter instances
+    # (the first server run added 0 colliders). Instance proxies cannot be edited, so
+    # de-instance them on this stage only, repeating for nested instances.
+    deinstanced = 0
+    for _ in range(8):
+        instances = [
+            prim
+            for prim in Usd.PrimRange(root_prim, Usd.TraverseInstanceProxies())
+            if prim.IsInstance() and not prim.IsInstanceProxy()
+        ]
+        if not instances:
+            break
+        for prim in instances:
+            prim.SetInstanceable(False)
+            deinstanced += 1
     added, skipped = 0, 0
-    for prim in Usd.PrimRange(root_prim):
-        if not prim.IsA(UsdGeom.Mesh) or prim.HasAPI(UsdPhysics.CollisionAPI):
+    for prim in Usd.PrimRange(root_prim, Usd.TraverseInstanceProxies()):
+        if not prim.IsA(UsdGeom.Gprim) or prim.HasAPI(UsdPhysics.CollisionAPI):
             continue
         if prim.IsInstanceProxy():
             skipped += 1
             continue
         UsdPhysics.CollisionAPI.Apply(prim)
-        UsdPhysics.MeshCollisionAPI.Apply(prim).CreateApproximationAttr().Set(UsdPhysics.Tokens.convexHull)
+        if prim.IsA(UsdGeom.Mesh):
+            UsdPhysics.MeshCollisionAPI.Apply(prim).CreateApproximationAttr().Set(UsdPhysics.Tokens.convexHull)
         added += 1
-    return {"added": added, "instance_proxies_skipped": skipped}
+    return {"added": added, "instance_proxies_skipped": skipped, "deinstanced": deinstanced}
 
 
 def _spawn_yam_with_colliders(prim_path: str, cfg, *args, **kwargs):
@@ -222,7 +238,7 @@ def _spawn_yam_with_colliders(prim_path: str, cfg, *args, **kwargs):
     # prim_path may be a regex such as /World/envs/env_.*/RobotLeft; colour every match.
     for match in sim_utils.find_matching_prims(prim_path, stage=stage) if hasattr(sim_utils, "find_matching_prims") else [prim]:
         counts = add_link_colliders(match)
-        print(f"[yam] {match.GetPath()}: added {counts['added']} link colliders, skipped {counts['instance_proxies_skipped']} instance proxies")
+        print(f"[yam] {match.GetPath()}: added {counts['added']} link colliders, de-instanced {counts['deinstanced']}, skipped {counts['instance_proxies_skipped']} instance proxies")
     return prim
 
 

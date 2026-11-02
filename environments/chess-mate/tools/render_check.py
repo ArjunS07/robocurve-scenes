@@ -242,8 +242,8 @@ def main() -> None:
         result = {}
         for name in robots:
             root = stage.GetPrimAtPath(f"/World/{name}")
-            base = next((p for p in Usd.PrimRange(root) if p.GetName() == "base"), None)
-            colliders = [str(p.GetPath()) for p in Usd.PrimRange(root) if p.HasAPI(UsdPhysics.CollisionAPI)]
+            base = next((p for p in Usd.PrimRange(root, Usd.TraverseInstanceProxies()) if p.GetName() == "base"), None)
+            colliders = [str(p.GetPath()) for p in Usd.PrimRange(root, Usd.TraverseInstanceProxies()) if p.HasAPI(UsdPhysics.CollisionAPI)]
             whole = cache.ComputeWorldBound(root).ComputeAlignedRange()
             entry = {"collider_count": len(colliders), "colliders_sample": colliders[:6]}
             entry["arm_bbox_at_home"] = {"min": list(whole.GetMin()), "max": list(whole.GetMax())}
@@ -252,7 +252,7 @@ def main() -> None:
                 # The links are nested under the base prim, so its bound is the whole arm.
                 # Measure only meshes whose nearest rigid-body ancestor is the base itself.
                 own = []
-                for prim in Usd.PrimRange(base):
+                for prim in Usd.PrimRange(base, Usd.TraverseInstanceProxies()):
                     if not prim.IsA(UsdGeom.Mesh):
                         continue
                     owner = prim
@@ -271,7 +271,7 @@ def main() -> None:
                 else:
                     entry["base_link_bbox"] = "no meshes owned by the base link"
                 # Where the arm reaches at home: +X means toward the board.
-                gripper = next((p for p in Usd.PrimRange(root) if p.GetName() == "gripper"), None)
+                gripper = next((p for p in Usd.PrimRange(root, Usd.TraverseInstanceProxies()) if p.GetName() == "gripper"), None)
                 if gripper is not None:
                     tip = cache.ComputeWorldBound(gripper).ComputeAlignedRange()
                     entry["gripper_bbox_at_home"] = {"min": list(tip.GetMin()), "max": list(tip.GetMax())}
@@ -304,7 +304,7 @@ def main() -> None:
 
     def collision_overlay():
         hidden, shown = 0, 0
-        for prim in Usd.PrimRange(stage.GetPrimAtPath("/World")):
+        for prim in Usd.PrimRange(stage.GetPrimAtPath("/World"), Usd.TraverseInstanceProxies()):
             path = str(prim.GetPath())
             if not (path.startswith("/World/board") or path.startswith("/World/white_") or path.startswith("/World/black_")):
                 continue
