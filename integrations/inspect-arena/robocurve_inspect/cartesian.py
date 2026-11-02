@@ -91,13 +91,15 @@ class CartesianEmbodiment(ArenaEmbodiment):
             rotation=relative_rotation(*goal[3:6]) @ reference
             jac=base_jacobian(offset_jacobian(kin.jacobian(),pose['offset_world']),pose['base_rotation'])
             dq=dls_delta(jac,goal[:3]-pose['position'],rotation_error(rotation,pose['rotation']))
-            measured=array(asset.data.joint_pos)[0,ids]
             limits=array(asset.data.soft_joint_pos_limits)
             if limits.ndim==3: limits=limits[0]
-            joint=np.clip(measured+dq,limits[ids,0],limits[ids,1])
             previous=self._joint_previous[index*7:index*7+6]
-            joint=np.clip(joint,previous-.025,previous+.025)
-            joint=np.clip(joint,limits[ids,0],limits[ids,1])
+            # Keep a persistent servo target. Re-seeding every update from the
+            # sagging measurement caps the PD tracking error at 0.025 rad and
+            # can remove the torque needed to resist gravity. The live pose
+            # still supplies closed-loop error/Jacobian; integrate its bounded
+            # correction into the held target, as the existing reach probe does.
+            joint=np.clip(previous+dq,limits[ids,0],limits[ids,1])
             output.extend((*joint,goal[6]))
         self._joint_previous=np.asarray(output)
         return self._joint_previous.copy()

@@ -144,3 +144,30 @@ class CartesianContractTests(unittest.TestCase):
             frames=list((output/'inspect/frames').rglob('*.npy'))
             self.assertGreater(len(frames),3)
             self.assertEqual(len(frames)%3,0)
+
+    def test_cartesian_hold_builds_pd_offset_under_gravity_and_actuator_lag(self):
+        env,adapter,obs=cartesian_setup()
+        ideal_step=env.step
+        def lagged_step(native):
+            # q_next = q + alpha*(q_command-q) - gravity. A fixed target
+            # needs a 0.075-rad tracking offset, larger than a per-step jog.
+            previous=[asset.data.joint_pos.copy() for _,asset,_,_ in adapter._resolved]
+            result=ideal_step(native)
+            for before,(_,asset,_,_) in zip(previous,adapter._resolved):
+                desired=asset.data.joint_pos.copy()
+                asset.data.joint_pos[:,:6]=before[:,:6]+.2*(desired[:,:6]-before[:,:6])
+                asset.data.joint_pos[:,2]-=.015
+            return result
+        env.step=lagged_step
+        goal=obs.state['eef_state'].copy()
+        for _ in range(150): result=adapter.step(Action(goal))
+        measured=result.observation.state['eef_state']
+        self.assertLess(abs(measured[2]-.2),.001)
+        self.assertLess(abs(measured[9]-.2),.001)
+        # The controller must retain load-supporting command error after
+        # Cartesian convergence rather than replacing it with a zero jog.
+        for index,(_,asset,_,_) in enumerate(adapter._resolved):
+            command=adapter._joint_previous[index*7+2]
+            self.assertGreater(command-asset.data.joint_pos[0,2],.06)
+        commands=np.array(env.native_calls)
+        self.assertLessEqual(np.abs(np.diff(commands[:,:6],axis=0)).max(),.0250001)

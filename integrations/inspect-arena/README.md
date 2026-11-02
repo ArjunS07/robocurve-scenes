@@ -9,7 +9,7 @@ Local tests use the exact reported server SDK versions, built from Inspect Robot
 - `inspect-robots 0.0.1.dev1+gc8a821ba7`
 - `inspect-robots-agent 0.29.0`
 
-33 tests pass with fake simulator data, including the real agent with a mocked OpenRouter response and the real Inspect eval/logging loop. No paid calls occur in these tests.
+34 tests pass with fake simulator data, including the real agent with a mocked OpenRouter response and the real Inspect eval/logging loop. No paid calls occur in these tests.
 
 The server has verified the scene/camera bootstrap, Argon communication, raw-joint motion, and MP4 export. **The new Cartesian control path and live CAD/Jacobian calibration still require the server reach check below.** A broken scene still needs to be fixed in that scene. Passing the reach check establishes local tracking, not a successful piece grasp or chess benchmark.
 
@@ -29,11 +29,11 @@ cd /home/ubuntu/workspace/robocurve-scenes
   --stream --public-ip 160.211.46.91
 ```
 
-This makes zero model calls. It raises each grasp point 15 mm, closes its gripper by 10%, reopens it, and returns it while the other arm holds. It records the measured position/orientation/opening errors in `reach_check.json`, saves all three frame streams, and exports `rollout.mp4`. A phase fails when tracking does not settle within 3 mm, 0.04 rad, and 0.03 normalized opening, or when the task terminates. Inspect both the report and the video before a paid task attempt.
+This makes zero model calls. It raises each grasp point 15 mm, closes its gripper by 10%, reopens it, and returns it while the other arm holds. It records the measured position/orientation/opening errors in `reach_check.json`, saves all three frame streams, and exports `rollout.mp4`. A phase fails when tracking does not settle within 3 mm, 0.04 rad, and 0.03 normalized opening, or when the task terminates. Errors above 50 mm or 0.3 rad abort early. `reach_trace.jsonl` records the commanded and measured EEF/joint state at each step. Inspect both the report and the video before a paid task attempt.
 
 The measured `eef_state` drives Cartesian interpolation. Observations also retain joint angles, both world base transforms, world grasp positions, and tool-axis directions. Native Arena action mapping, cameras, scoring and MP4 recording are retained. `last_task_result.json` saves the last task score and hard-failure reasons; terminal reasons are printed too.
 
-For diagnostics only, `--control-interface joints` retains the earlier raw joint interface. Cartesian controls have per-step limits of 2 mm, 0.04 rad and 0.05 opening, and the IK joint command changes are limited to 0.025 rad. These are local servo limits, not arm/table collision planning. Unreachable targets can leave a measurable residual and must not be reported as reached.
+For diagnostics only, `--control-interface joints` retains the earlier raw joint interface. Cartesian controls have per-step limits of 2 mm, 0.04 rad and 0.05 opening, and the IK joint command changes are limited to 0.025 rad. The IK correction updates a persistent joint command, preserving the PD offset required to hold against gravity rather than re-seeding from a sagging measured pose each step. These are local servo limits, not arm/table collision planning. Unreachable targets can leave a measurable residual and must not be reported as reached.
 
 ## First run: real camera capture, no model calls
 

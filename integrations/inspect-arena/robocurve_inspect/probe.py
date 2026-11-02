@@ -39,12 +39,23 @@ def run_reach_check(adapter,scene,output,max_steps=480):
                 position=np.array([np.linalg.norm(state[i*7:i*7+3]-goal[i*7:i*7+3]) for i in range(2)])
                 opening=np.max(np.abs(state[[6,13]]-goal[[6,13]]))
                 angles=np.max(np.abs(state[[3,4,5,10,11,12]]-goal[[3,4,5,10,11,12]]))
+                trace={'step':counter,'commanded_eef':command.tolist(),'measured_eef':state.tolist(),
+                       'commanded_joints':adapter._joint_previous.tolist(),
+                       'measured_joints':observation.state['joint_command_state'].tolist(),
+                       'position_error_mm':(position*1000).tolist()}
+                with (output/'reach_trace.jsonl').open('a') as stream:
+                    stream.write(json.dumps(trace)+'\n')
+                if max(position)>.05 or angles>.3:
+                    row['tracking_abort']='Over 50 mm position error or 0.3 rad orientation error'
+                    break
                 if result.terminated or result.truncated: break
                 if attempt>=14 and max(position)<.003 and opening<.03 and angles<.04: break
             row.update({'position_error_mm':(position*1000).tolist(),'opening_error':float(opening),
                         'orientation_error_rad':float(angles),'steps':attempt+1,
+                        'measured_eef':state.tolist(), 'commanded_joints':adapter._joint_previous.tolist(),
+                        'measured_joints':observation.state['joint_command_state'].tolist(),
                         'passed':bool(max(position)<.003 and opening<.03 and angles<.04
-                                      and not result.terminated and not result.truncated and not row.get('step_budget_exhausted'))})
+                                      and not result.terminated and not result.truncated and not row.get('step_budget_exhausted') and not row.get('tracking_abort'))})
             if result.terminated or result.truncated: row['terminal']=result.info
             report['phases'].append(row)
             (output/'reach_check.json').write_text(json.dumps(report,indent=2)+'\n')
