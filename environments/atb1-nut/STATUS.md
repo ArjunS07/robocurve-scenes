@@ -13,9 +13,15 @@ One approximate M8 × 1.25 nut-and-stud station inspired by the 8 mm nut on NIST
 - maple_table_robolab spawns at the origin; collision top z = 0.003; footprint x [0.1986, 0.8986], y [−0.4779, 0.5221].
 - An articulation whose root prim is not itself the rigid body cannot take `fix_root_link` (battery-remote startup failure). This package no longer uses that pattern.
 
-**Nothing in this package has run on the server yet.** No screenshot exists. Run `tools/physics_check.py` and the launcher (see INTEGRATION.md) and record the revision they print.
+**Verified on the server, this package** (`tools/physics_check.py --no-render` and the launcher; scripted torque on the nut, no robot):
 
-**Code-checked only** (44 pure tests, `python3 tests/run_pure_tests.py`):
+- `launch_nut_threading.py` completes 50 zero-action steps with no false failure (after the ActionTerm properties, observation group, reset-term and frozen-config fixes).
+- Engage: dropped 0.1 mm above the first turn, the nut lands on the ridge (8.038 mm gap vs 8.056 expected). Before the thread contact offset was raised from 0.04 to 0.8 mm the pins tunnelled through every turn and the nut accelerated at ~2 g to the seat.
+- At `be4c8c8`, driven at 2 mN m (free): 3 turns at **1.248 mm/turn** (pitch 1.25), within 0.066 mm of the helix, 1.5° max tilt; released mid-thread it is **retained**; a pull of 2× its weight does not lift it (**held on stud**); seated and released it **scores 100**; backed off at 6 mN m held upright it unscrews 6.5 turns and rises 9.2 mm (**freed**).
+- With 24 segments per turn the three pins crossed seams in lockstep and stalled at 0.39 turns; 32 segments (not a multiple of 3) fixed that.
+- **Robustness limit:** held upright, 2 mN m tracks to 0.032 mm but is slow; 5 mN m reaches the goal at 1.62 mm/turn (partly skipping); 10–20 mN m throw the nut off the stud even with tilt held at 0, as does 20 mN m free. The likely cause is the check's own rate controller: torque builds to the cap at a seam and the 5 g nut spins up when it breaks free. A robot turning the nut by wrist rotation is a different load and **has not been tested**.
+
+**Code-checked only** (50 pure tests, `python3 tests/run_pure_tests.py`):
 
 - quaternions read through `tasks/state_values.py` (xyzw, identity stays identity);
 - recorder and reset callbacks accept lists, tensors, slices, and `None`;
