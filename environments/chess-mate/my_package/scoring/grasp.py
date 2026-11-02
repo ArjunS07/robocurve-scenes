@@ -7,6 +7,14 @@ from my_package.scoring.config import ChessMateConfig
 from my_package.scoring.math3d import norm, sub
 
 
+def gripper_hold_known(
+    gripper_positions_xyz: tuple[tuple[float, float, float] | None, ...],
+    finger_positions_m: tuple[tuple[float, float] | None, ...],
+) -> bool:
+    """Holding can only be ruled out when every arm's gripper body and fingers were read."""
+    return all(position is not None and fingers is not None for position, fingers in zip(gripper_positions_xyz, finger_positions_m))
+
+
 def gripper_is_holding(
     cfg: ChessMateConfig,
     piece_position_xyz: tuple[float, float, float],
@@ -15,7 +23,10 @@ def gripper_is_holding(
 ) -> bool:
     """True when either arm is closed on the piece.
 
-    A missing gripper body or finger joint does not count as a hold.
+    A missing gripper body or finger joint does not count as a hold here; the
+    caller must also check ``gripper_hold_known`` so a missing frame cannot
+    grant release credit. This is a distance and finger-opening proxy, not a
+    contact check: closed fingers near a piece count as holding it.
     """
     robot = cfg.robot
     holding = False

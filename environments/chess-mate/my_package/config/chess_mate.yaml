@@ -6,8 +6,12 @@ light_intensity: 2000.0
 
 # The photographed set is a light-wood 3-in-1 chess, checkers, and tic-tac-toe board
 # with dark squares and turned pieces. These sizes are a likeness, not that product's drawing.
+# Task 7: White mates in one, white pieces nearest the robot (rank 1 toward -X).
+# This is the color mirror of the earlier Black-to-move FEN; the solver finds
+# exactly one mate, a quiet queen move. build_puzzles rejects Black to move,
+# captures, castling, promotion, and en passant.
 fen_sequence:
-  - "r1bqrk2/pppp1p2/3nb1p1/4pn1p/6P1/5P1P/PPPPP3/RNBQKBNR b KQ - 0 2"
+  - "rnbqkbnr/ppppp3/5p1p/6p1/4PN1P/3NB1P1/PPPP1P2/R1BQRK2 w kq - 0 2"
 
 white_rgb: [0.86, 0.75, 0.55]
 black_rgb: [0.12, 0.10, 0.09]

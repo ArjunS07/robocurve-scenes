@@ -77,6 +77,25 @@ def _homes_for(fen: str, names: dict[tuple[str, str], tuple[str, ...]]) -> dict[
     return homes
 
 
+def _require_white_single_piece_move(index: int, fen: str, move) -> None:
+    """The task has White mate by moving one piece while every other piece stays put.
+
+    A capture removes a second piece, castling moves a rook, and a promotion
+    swaps the piece, so none of those fit the physical scorer.
+    """
+    placement = parse_fen(fen)
+    if placement.side != "white":
+        raise ValueError(f"puzzle {index} has {placement.side} to move; the task requires White to deliver mate")
+    if move.castle is not None:
+        raise ValueError(f"puzzle {index} mates by castling ({move.uci}), which moves two pieces")
+    if move.promotion is not None:
+        raise ValueError(f"puzzle {index} mates by promotion ({move.uci}), which replaces the piece")
+    if move.dest in placement.occupants():
+        raise ValueError(f"puzzle {index} mates by capture ({move.uci}), which removes a second piece")
+    if move.role == "pawn" and move.start[0] != move.dest[0]:
+        raise ValueError(f"puzzle {index} mates en passant ({move.uci}), which removes a second piece")
+
+
 def build_puzzles(fens: tuple[str, ...] | list[str]) -> tuple[Puzzle, ...]:
     if not fens:
         raise ValueError("fen_sequence must contain at least one puzzle")
@@ -88,6 +107,7 @@ def build_puzzles(fens: tuple[str, ...] | list[str]) -> tuple[Puzzle, ...]:
             raise ValueError(f"puzzle {index} does not use the same set of pieces as puzzle 0")
         homes = _homes_for(fen, names)
         move = unique_mating_move(fen)
+        _require_white_single_piece_move(index, fen, move)
         start = square_name(move.start)
         dest = square_name(move.dest)
         owners = [name for name, square in homes.items() if square == start]

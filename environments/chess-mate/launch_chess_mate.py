@@ -1,61 +1,72 @@
-"""Launch the chess scene with the Arena checkout's own interpreter.
-
-Import torch before Arena starts. This install's physics path is
-``--visualizer none``. The script does not pass a headless flag and does not
-record a viewport video.
-"""
+"""Run this scene using the existing Arena install, optionally with WebRTC streaming."""
 
 from __future__ import annotations
 
 import argparse
+import os
 import sys
+import tempfile
 from pathlib import Path
 
 
-def main() -> None:
-    parser = argparse.ArgumentParser(description="Physics smoke for the YAM chess mate-in-one scene.")
-    parser.add_argument(
-        "--num-steps",
-        type=int,
-        default=50,
-        help="Zero-action physics steps. This is not the 90 second episode and it does not move a piece.",
-    )
-    parser.add_argument(
-        "--enable-cameras",
-        action="store_true",
-        help="Forward --enable_cameras. The default smoke run does not spawn cameras.",
-    )
-    args = parser.parse_args()
+def make_parser():
+    parser = argparse.ArgumentParser(description="Zero-action scene preview or physics smoke test.")
+    parser.add_argument("--arena-root", type=Path, default=Path("/home/ubuntu/workspace/IsaacLab-Arena"))
+    parser.add_argument("--stream", action="store_true", help="Keep a Kit viewport open for the WebRTC client.")
+    parser.add_argument("--public-ip", default=os.environ.get("PUBLIC_IP"), help="Instance public IP for WebRTC.")
+    parser.add_argument("--num-steps", type=int, default=None, help="Default: 50 smoke steps, or 1000000 when streaming.")
+    parser.add_argument("--enable-cameras", action="store_true", help="Also create the three task cameras.")
+    return parser
 
-    root = Path(__file__).resolve().parent
-    arena = Path("/home/ubuntu/workspace/IsaacLab-Arena")
-    sys.path.insert(0, str(root))
-    sys.path.insert(0, str(arena))
 
-    import torch  # before Arena / runpy; CUDA import-order workaround for this machine
-    import runpy
-
+def build_argv(args, root):
     argv = [
-        str(arena / "isaaclab_arena/evaluation/policy_runner.py"),
-        "--visualizer",
-        "none",
-        "--device",
-        "cuda:0",
-        "--num_envs",
-        "1",
-        "--policy_type",
-        "zero_action",
-        "--num_steps",
-        str(args.num_steps),
+        str(args.arena_root / "isaaclab_arena/evaluation/policy_runner.py"),
+        "--visualizer", "kit" if args.stream else "none",
+        "--device", "cuda:0",
+        "--num_envs", "1",
+        "--policy_type", "zero_action",
+        "--num_steps", str(args.num_steps if args.num_steps is not None else (1000000 if args.stream else 50)),
+        "--output_base_dir", str(root / "outputs"),
         "--no_solve_relations",
         "--external_environment_class_path",
         "my_package.isaaclab_arena_environments.chess_environment:ChessMateEnvironment",
-        "chess_mate",
     ]
+    if args.stream:
+        argv.extend(["--livestream", "1"])
     if args.enable_cameras:
         argv.append("--enable_cameras")
-    sys.argv = argv
-    runpy.run_path(argv[0], run_name="__main__")
+    # All runner options precede the environment subcommand.
+    argv.append("chess_mate")
+    return argv
+
+
+def main():
+    parser = make_parser()
+    args = parser.parse_args()
+    if args.num_steps is not None and args.num_steps <= 0:
+        parser.error("--num-steps must be positive")
+    if args.stream and not args.public_ip:
+        parser.error("Streaming needs --public-ip INSTANCE_IP (or PUBLIC_IP).")
+    root = Path(__file__).resolve().parent
+    runner = args.arena_root / "isaaclab_arena/evaluation/policy_runner.py"
+    if not runner.is_file():
+        parser.error(f"Arena runner not found: {runner}. Use --arena-root to select the existing install.")
+    if args.stream:
+        os.environ["PUBLIC_IP"] = args.public_ip
+        print("WebRTC client: global.prd.ga.run.brev.nvidia.com | Signal 24317 | Stream 28337", flush=True)
+        print("Preview runs until Ctrl+C or the step limit; it does not perform the task.", flush=True)
+    # Keep generated assets separate from tracked files and other users' runs.
+    (root / "outputs").mkdir(exist_ok=True)
+    generated = Path(tempfile.mkdtemp(prefix="assets-", dir=root / "outputs"))
+    os.environ["ROBOCURVE_GENERATED_DIR"] = str(generated)
+    sys.path.insert(0, str(args.arena_root))
+    sys.path.insert(0, str(root))
+    import torch  # before Kit: prevents its older CUDA library from shadowing PyTorch's
+    import runpy
+
+    sys.argv = build_argv(args, root)
+    runpy.run_path(sys.argv[0], run_name="__main__")
 
 
 if __name__ == "__main__":

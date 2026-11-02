@@ -70,7 +70,7 @@ class MateScoreMetric(MetricBase):
 class ChessMateTask(TaskBase):
     def __init__(self, cfg: ChessMateConfig):
         description = (
-            "Checkmate the opponent by moving one piece onto the mating square and releasing it upright. "
+            "Play White: checkmate Black by moving one white piece onto the mating square and releasing it upright. "
             "The board stays on its mark, with the white pieces nearest the robot. "
             "Every other piece stays on its original square."
         )

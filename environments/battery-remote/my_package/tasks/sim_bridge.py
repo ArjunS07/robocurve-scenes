@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import torch
 
+from my_package.tasks.state_values import env_indices, quaternion_xyzw
+
 from my_package.scoring.action_map import arm_bindings
 from my_package.scoring.config import active_slots
 from my_package.scoring.grasp import gripper_is_holding
@@ -57,11 +59,6 @@ def _step_id(env) -> int:
 def _as_tuple3(tensor) -> tuple[float, float, float]:
     values = tensor.detach().cpu().tolist()
     return (float(values[0]), float(values[1]), float(values[2]))
-
-
-def _xyzw_from_wxyz(quat) -> tuple[float, float, float, float]:
-    values = quat.detach().cpu().tolist()
-    return (float(values[1]), float(values[2]), float(values[3]), float(values[0]))
 
 
 def _find_one(asset, name: str, kind: str):
@@ -146,7 +143,7 @@ def _read_env(env, env_index: int):
     origin = env.scene.env_origins[env_index]
     remote = env.scene["remote"]
     remote_pos = _as_tuple3(remote.data.root_pos_w[env_index] - origin)
-    remote_quat = _xyzw_from_wxyz(remote.data.root_quat_w[env_index])
+    remote_quat = quaternion_xyzw(remote.data.root_quat_w[env_index])
     displacement = norm(sub(remote_pos, cfg.remote_pose.position_xyz))
     yaw_error = yaw_error_deg(remote_quat, cfg.remote_pose.rotation_xyzw)
     gripper_positions, finger_positions = _gripper_observation(env, env_index, cfg)
@@ -154,7 +151,7 @@ def _read_env(env, env_index: int):
     for slot in active_slots(cfg):
         asset = env.scene[slot.name]
         position = _as_tuple3(asset.data.root_pos_w[env_index] - origin)
-        rotation = _xyzw_from_wxyz(asset.data.root_quat_w[env_index])
+        rotation = quaternion_xyzw(asset.data.root_quat_w[env_index])
         joint_name = slot.name.replace("battery_", "slot_") + "_plunger"
         measured = measure_battery(
             cfg,
@@ -213,14 +210,14 @@ def reset_battery_insertion_state(env, env_ids) -> None:
     if env_ids is None:
         indices = range(env.num_envs)
     else:
-        indices = env_ids.detach().cpu().tolist()
+        indices = env_indices(env_ids, env.num_envs)
     for index in indices:
         clear_env(int(index))
 
 
 def scores_tensor(env, env_ids):
     update_from_env(env)
-    indices = env_ids.detach().cpu().tolist()
+    indices = env_indices(env_ids, env.num_envs)
     values = []
     for index in indices:
         report = get_report(int(index))

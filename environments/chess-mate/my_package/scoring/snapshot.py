@@ -14,6 +14,9 @@ class PieceSnapshot:
     released: bool
     off_table: bool
     ever_lifted: bool = False
+    # False when the gripper body or finger joints could not be read. Release
+    # is then unknown, and the scorer does not award the released tier.
+    hold_known: bool = True
 
 
 @dataclass(frozen=True)

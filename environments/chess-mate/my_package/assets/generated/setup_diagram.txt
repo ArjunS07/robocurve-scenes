@@ -1,11 +1,11 @@
 puzzle 0
-8 r . b q r k . .
-7 p p p p . p . .
-6 . . . n b . p .
-5 . . . . p n . p
-4 . . . . . . P .
-3 . . . . . P . P
-2 P P P P P . . .
-1 R N B Q K B N R
+8 r n b q k b n r
+7 p p p p p . . .
+6 . . . . . p . p
+5 . . . . . . p .
+4 . . . . P N . P
+3 . . . N B . P .
+2 P P P P . P . .
+1 R . B Q R K . .
   a b c d e f g h
-side black
+side white

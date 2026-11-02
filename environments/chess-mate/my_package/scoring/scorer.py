@@ -5,6 +5,12 @@ entirely inside the mating square, and every other piece still on its own
 square. 75 is that pose while a gripper is still holding it. 50 is a lift of
 the recorded piece. 25 is a lift of some other piece. Off the table, a board
 that leaves its mark, and two pieces each fully on a new square force 0.
+
+100 and 75 also require that the recorded piece was lifted clear at some
+point, so sliding it across the board earns no placement credit. Another
+piece that was lifted and put back on its own square does not block 100.
+If the gripper state could not be read, release is unknown and 100 is not
+awarded.
 """
 
 from __future__ import annotations
@@ -50,9 +56,11 @@ def _tilt_deg(rotation_xyzw: tuple[float, float, float, float]) -> float:
     return angle_deg(rotate(rotation_xyzw, (0.0, 0.0, 1.0)), (0.0, 0.0, 1.0))
 
 
-def _lowest_z(position_xyz: tuple[float, float, float], rotation_xyzw, radius: float) -> float:
+def _lowest_z(position_xyz: tuple[float, float, float], rotation_xyzw, radius: float, height: float) -> float:
+    """Lowest point of a cylinder whose origin is the center of its bottom face."""
     tilt = math.radians(_tilt_deg(rotation_xyzw))
-    return position_xyz[2] - radius * math.sin(tilt)
+    rim = radius * math.sin(tilt)
+    return position_xyz[2] + min(0.0, height * math.cos(tilt)) - rim
 
 
 def _board_top(snapshot: SceneSnapshot, cfg: ChessMateConfig) -> tuple[float, float, float]:
@@ -87,7 +95,7 @@ def _square_of(cfg: ChessMateConfig, local_xy: tuple[float, float], radius: floa
 
 
 def is_released(piece: PieceSnapshot) -> bool:
-    return piece.released and not piece.gripper_holding
+    return piece.hold_known and piece.released and not piece.gripper_holding
 
 
 def carry_episode_memory(previous: SceneSnapshot | None, observed: SceneSnapshot) -> SceneSnapshot:
@@ -146,7 +154,7 @@ def step(cfg: ChessMateConfig, snapshot: SceneSnapshot, dt: float, puzzle: Puzzl
     for piece in snapshot.pieces:
         profile = profile_for(cfg, puzzle.move.role if piece.name == puzzle.move.piece_name else _role_of(piece.name))
         local = world_to_local(snapshot.board_position_xyz, snapshot.board_rotation_xyzw, piece.position_xyz)
-        lowest = _lowest_z(piece.position_xyz, piece.rotation_xyzw, profile.base_radius_m)
+        lowest = _lowest_z(piece.position_xyz, piece.rotation_xyzw, profile.base_radius_m, profile.height_m)
         lifted_now = lowest > top[2] + cfg.scoring.lift_clearance_m
         ever = piece.ever_lifted or lifted_now
         if piece.off_table or _off_table(cfg, piece.position_xyz):
@@ -157,7 +165,8 @@ def step(cfg: ChessMateConfig, snapshot: SceneSnapshot, dt: float, puzzle: Puzzl
             transferred.append(piece.name)
         upright = _tilt_deg(piece.rotation_xyzw) <= cfg.scoring.upright_angle_deg
         rested = abs(local[2] - cfg.board.thickness_m / 2.0) <= cfg.scoring.rest_z_tolerance_m
-        on_home = square == home and not lifted_now and rested
+        # A toppled piece still inside its square is not "remaining" on it.
+        on_home = square == home and not lifted_now and rested and upright
         states[piece.name] = {
             "square": square,
             "upright": upright,
@@ -195,9 +204,9 @@ def step(cfg: ChessMateConfig, snapshot: SceneSnapshot, dt: float, puzzle: Puzzl
     nobody_lifted = not any(lifted_flags.values())
     if ever_off or ever_board or len(transferred) >= 2 or nobody_lifted:
         score = 0
-    elif on_dest and released and correct_state["rested"] and others_remain:
+    elif correct_lifted and on_dest and released and correct_state["rested"] and others_remain:
         score = 100
-    elif on_dest and not released:
+    elif correct_lifted and on_dest and not released:
         score = 75
     elif correct_lifted:
         score = 50

@@ -1,16 +1,10 @@
 # Copy this package onto the remote machine
 
-The files in this directory are the drop-in. Nothing here was run in Isaac Sim.
+The files in this directory are the drop-in. The scene has been built on the server once; it has not completed a rollout.
 
-## Copy
+## Location
 
-Give this directory its own folder. Do not merge it into Isaac Lab-Arena and do not use `--delete` against a folder that already holds another scene.
-
-```bash
-rsync -a --exclude '__pycache__' ./ /home/ubuntu/workspace/robocurve/chess-mate/
-```
-
-That adds `launch_chess_mate.py`, `my_package/`, and `tests/`.
+On the server this package lives in the repository checkout at `/home/ubuntu/workspace/robocurve-scenes/environments/chess-mate`. Pull the branch there; do not copy it into Isaac Lab-Arena.
 
 ## Do not touch
 
@@ -27,37 +21,41 @@ This package does not ship `my_package/isaaclab_arena_environments/__init__.py`,
 Physics smoke, zero action, 50 steps. This is not a 90 second episode and the arm does not move a piece.
 
 ```bash
-cd /home/ubuntu/workspace/robocurve/chess-mate
+cd /home/ubuntu/workspace/robocurve-scenes/environments/chess-mate
 /home/ubuntu/workspace/IsaacLab-Arena/.venv/bin/python launch_chess_mate.py
 ```
 
-Cameras, still without a viewport recording:
+Live preview for the WebRTC client (one streaming scene at a time on these ports):
 
 ```bash
-/home/ubuntu/workspace/IsaacLab-Arena/.venv/bin/python launch_chess_mate.py --enable-cameras
+/home/ubuntu/workspace/IsaacLab-Arena/.venv/bin/python launch_chess_mate.py --stream --public-ip 160.211.46.91
 ```
 
-The script puts this directory and `/home/ubuntu/workspace/IsaacLab-Arena` on `sys.path`, imports `torch`, then runs `isaaclab_arena/evaluation/policy_runner.py` with:
+Client settings that worked for the Franka example: server `global.prd.ga.run.brev.nvidia.com`, signal port `24317`, stream port `28337`. Streaming defaults to 1,000,000 zero-action steps so the preview stays up; it does not perform the task.
+
+Options: `--enable-cameras`, `--num-steps N`, `--arena-root PATH`.
+
+The launcher puts this directory and the Arena checkout on `sys.path`, imports `torch` before Kit (CUDA library order on this machine), then runs `isaaclab_arena/evaluation/policy_runner.py`. Runner flags come before the `chess_mate` subcommand:
 
 ```text
---visualizer none
+--visualizer none            (kit with --stream)
 --device cuda:0
 --num_envs 1
 --policy_type zero_action
---num_steps 50
+--num_steps 50               (1000000 with --stream)
+--output_base_dir <this dir>/outputs
 --no_solve_relations
 --external_environment_class_path my_package.isaaclab_arena_environments.chess_environment:ChessMateEnvironment
+[--livestream 1] [--enable_cameras]
 chess_mate
 ```
 
-`--enable_cameras` is appended for `--enable-cameras`. The script does not pass a headless flag and does not pass `--record_viewport_video`.
-
-Launch rewrites `my_package/assets/generated/` from the YAML before the scene is built. `--no_solve_relations` keeps the marked board pose from being moved by Arena's `On()` solver. This scene does not add `On()` relations.
-
-The task string does not name the mating piece or the destination square. The evaluator sheet is `my_package/assets/generated/puzzle_record.txt`, rewritten on launch. Do not put that file into the policy prompt.
+Generated USD and the evaluator sheet are written to a fresh `outputs/assets-*` directory per launch (`ROBOCURVE_GENERATED_DIR`), not over the tracked examples in `my_package/assets/generated/`. `outputs/` is git-ignored. The task string does not name the mating piece or square; do not put `puzzle_record.txt` into the policy prompt.
 
 ## If startup fails
 
 - `UsdFileCfg` rejects `rigid_props`, `collision_props`, `mass_props`, or `physics_material`: those fields are copied from Arena's procedural cuboid spawner. Drop the rejected fields in `my_package/assets/spawn.py` if this Isaac Lab build does not accept them.
+- The board trips `board_moved` at step 0, or pieces spawn rotated after the first reset: the installed quaternion order differs. Change `SIM_QUAT_ORDER` in `my_package/tasks/state_values.py`.
+- A warning says the gripper body or finger joints were not found: release is then treated as unknown and the score cannot reach 100. Fix the names in `my_package/scoring/action_map.py` from the printed live body list.
 - The action term prints the live joint list: set `robot.arm_layout` to `duplicated_single_arm` or `combined`.
 - Finger direction is backwards: change `finger_open_m` and `finger_closed_m` together. The USDA file is not edited.

@@ -4,11 +4,11 @@ from __future__ import annotations
 
 import torch
 
-from isaaclab_arena.utils.pose import Pose
+from my_package.tasks.state_values import env_indices, quaternion_xyzw, sim_quaternion
 
 from my_package.assets.geometry import piece_poses
 from my_package.scoring.action_map import arm_bindings
-from my_package.scoring.grasp import gripper_is_holding
+from my_package.scoring.grasp import gripper_hold_known, gripper_is_holding
 from my_package.scoring.puzzles import Puzzle
 from my_package.scoring.runtime_state import (
     active_puzzle_index,
@@ -62,12 +62,6 @@ def _as_tuple3(tensor) -> tuple[float, float, float]:
     return (float(values[0]), float(values[1]), float(values[2]))
 
 
-def _xyzw_from_wxyz(quat) -> tuple[float, float, float, float]:
-    # Isaac Lab's root_quat_w is wxyz. The scorer stores xyzw, matching Arena's Pose.
-    values = quat.detach().cpu().tolist()
-    return (float(values[1]), float(values[2]), float(values[3]), float(values[0]))
-
-
 def _find_one(asset, name: str, kind: str):
     finder = asset.find_joints if kind == "joint" else asset.find_bodies
     indices, names = finder(f"^{name}$", preserve_order=True)
@@ -96,7 +90,8 @@ def _gripper_observation(env, env_index: int, cfg):
                 f"gripper-{binding.side}",
                 "chess mate could not find gripper body "
                 f"{binding.gripper_body!r} or finger joints {binding.finger_joints} on {binding.asset_name}. "
-                "Holding is treated as false until the YAML names match the USDA.",
+                f"Live bodies: {list(getattr(asset, 'body_names', []))}. "
+                "Release is treated as unknown (no 100 score) until the YAML names match the USDA.",
             )
             continue
         origin = env.scene.env_origins[env_index]
@@ -119,13 +114,14 @@ def _read_env(env, env_index: int, puzzle: Puzzle) -> SceneSnapshot:
     origin = env.scene.env_origins[env_index]
     board = env.scene["board"]
     board_pos = _as_tuple3(board.data.root_pos_w[env_index] - origin)
-    board_quat = _xyzw_from_wxyz(board.data.root_quat_w[env_index])
+    board_quat = quaternion_xyzw(board.data.root_quat_w[env_index])
     gripper_positions, finger_positions = _gripper_observation(env, env_index, cfg)
+    hold_known = gripper_hold_known(gripper_positions, finger_positions)
     pieces = []
     for name in puzzle.homes:
         asset = env.scene[name]
         position = _as_tuple3(asset.data.root_pos_w[env_index] - origin)
-        rotation = _xyzw_from_wxyz(asset.data.root_quat_w[env_index])
+        rotation = quaternion_xyzw(asset.data.root_quat_w[env_index])
         holding = gripper_is_holding(cfg, position, gripper_positions, finger_positions)
         pieces.append(
             PieceSnapshot(
@@ -133,8 +129,9 @@ def _read_env(env, env_index: int, puzzle: Puzzle) -> SceneSnapshot:
                 position_xyz=position,
                 rotation_xyzw=rotation,
                 gripper_holding=holding,
-                released=not holding,
+                released=hold_known and not holding,
                 off_table=False,
+                hold_known=hold_known,
             )
         )
     return SceneSnapshot(pieces=tuple(pieces), board_position_xyz=board_pos, board_rotation_xyzw=board_quat)
@@ -158,15 +155,13 @@ def update_from_env(env) -> None:
 def _write_root(env, name: str, position, rotation, env_index: int) -> None:
     asset = env.scene[name]
     origin = env.scene.env_origins[env_index]
+    quat = sim_quaternion(rotation)
     pose = torch.tensor(
         [[
             position[0] + float(origin[0]),
             position[1] + float(origin[1]),
             position[2] + float(origin[2]),
-            rotation[0],
-            rotation[1],
-            rotation[2],
-            rotation[3],
+            *quat,
         ]],
         device=env.device,
         dtype=torch.float32,
@@ -182,11 +177,7 @@ def reset_chess_state(env, env_ids) -> None:
     from my_package.scoring.config import puzzles_for
 
     puzzles = puzzles_for(cfg)
-    if env_ids is None:
-        indices = range(env.num_envs)
-    else:
-        indices = [int(value) for value in env_ids.detach().cpu().tolist()]
-    for index in indices:
+    for index in env_indices(env_ids, env.num_envs):
         puzzle_index = note_reset(index, len(puzzles))
         puzzle = puzzles[puzzle_index]
         for pose in piece_poses(cfg, puzzle):
@@ -198,13 +189,11 @@ def reset_chess_state(env, env_ids) -> None:
             cfg.board_pose.rotation_xyzw,
             index,
         )
-        # Pose is only used as a type check that the written rotation is xyzw.
-        Pose(position_xyz=cfg.board_pose.position_xyz, rotation_xyzw=cfg.board_pose.rotation_xyzw)
 
 
 def scores_tensor(env, env_ids):
     update_from_env(env)
-    indices = env_ids.detach().cpu().tolist()
+    indices = env_indices(env_ids, env.num_envs)
     values = []
     for index in indices:
         report = get_report(int(index))

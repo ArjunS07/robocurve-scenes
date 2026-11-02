@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import unittest
+import tempfile
 from pathlib import Path
 
 from my_package.assets.geometry import design_report, write_geometry
@@ -19,22 +20,22 @@ class GeometryTests(unittest.TestCase):
 
     def test_usda_has_squares_and_no_weld_or_answer_mark(self):
         cfg = load_config(default_config_path())
-        root = Path(__file__).resolve().parents[1]
-        paths = write_geometry(cfg, root / "my_package" / "assets" / "generated")
-        board = paths["board"].read_text()
-        self.assertEqual(board.count('def Cube "square_'), 64)
-        self.assertNotIn("PhysicsFixedJoint", board)
-        self.assertNotIn("d8h4", board)
-        marks = paths["marks"].read_text()
-        self.assertNotIn("d8h4", marks)
-        self.assertNotIn("square_h4", marks)
-        record = paths["record"].read_text()
-        self.assertIn("d8h4", record)
-        self.assertIn("black_queen_d8", record)
-        self.assertIn("destination h4", record)
-        diagram = paths["diagram"].read_text()
-        self.assertNotIn("d8h4", diagram)
-        self.assertIn("side black", diagram)
+        with tempfile.TemporaryDirectory() as directory:
+            paths = write_geometry(cfg, directory)
+            board = paths["board"].read_text()
+            self.assertEqual(board.count('def Cube "square_'), 64)
+            self.assertNotIn("PhysicsFixedJoint", board)
+            self.assertNotIn("d1h5", board)
+            marks = paths["marks"].read_text()
+            self.assertNotIn("d1h5", marks)
+            self.assertNotIn("square_h5", marks)
+            record = paths["record"].read_text()
+            self.assertIn("d1h5", record)
+            self.assertIn("white_queen_d1", record)
+            self.assertIn("destination h5", record)
+            diagram = paths["diagram"].read_text()
+            self.assertNotIn("d1h5", diagram)
+            self.assertIn("side white", diagram)
 
     def test_zero_action_holds_home_and_open_fingers(self):
         cfg = load_config(default_config_path())
@@ -84,8 +85,8 @@ class GeometryTests(unittest.TestCase):
         )
         for path in hidden:
             text = path.read_text()
-            self.assertNotIn("d8h4", text, path.name)
-            self.assertNotIn("destination h4", text, path.name)
+            self.assertNotIn("d1h5", text, path.name)
+            self.assertNotIn("destination h5", text, path.name)
 
     def test_yaml_names_the_provisional_thresholds(self):
         text = default_config_path().read_text()

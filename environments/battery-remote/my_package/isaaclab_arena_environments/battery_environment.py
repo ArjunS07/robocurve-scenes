@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import os
 from pathlib import Path
 
 from isaaclab_arena.environments.isaaclab_arena_environment import IsaacLabArenaEnvironment
@@ -27,7 +28,7 @@ class BatteryInsertionEnvironment(ExampleEnvironmentBase):
         cfg = load_config(config_arg or default_config_path())
         if getattr(args_cli, "single_slot", False):
             cfg = with_single_slot(cfg, True)
-        generated = Path(__file__).resolve().parents[1] / "assets" / "generated"
+        generated = Path(os.environ.get("ROBOCURVE_GENERATED_DIR", str(Path(__file__).resolve().parents[2] / "outputs" / "generated")))
         paths = write_geometry(cfg, generated)
         set_active_config(cfg)
 

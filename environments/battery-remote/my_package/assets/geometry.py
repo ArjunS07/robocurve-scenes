@@ -522,8 +522,8 @@ def _remote_usda(cfg: BatteryInsertionConfig, numbers: dict[str, float]) -> str:
         joint_blocks.append(
             f"""    def PhysicsPrismaticJoint "{joint}"
     {{
-        rel physics:body0 = <chassis>
-        rel physics:body1 = <{link}>
+        rel physics:body0 = <../chassis>
+        rel physics:body1 = <../{link}>
         uniform token physics:axis = "X"
         float physics:lowerLimit = 0
         float physics:upperLimit = {_fmt(compartment.plunger_travel_m)}

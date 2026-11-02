@@ -46,7 +46,7 @@ class ConfiguredUsdObject(Object):
                 disable_gravity=False,
             ),
             collision_props=sim_utils.CollisionPropertiesCfg(contact_offset=physics["contact_offset_m"]),
-            mass_props=sim_utils.MassPropertiesCfg(mass=physics["mass_kg"]),
+            mass_props=(None if self._actuators else sim_utils.MassPropertiesCfg(mass=physics["mass_kg"])),
             physics_material=sim_utils.RigidBodyMaterialCfg(
                 static_friction=physics["static_friction"],
                 dynamic_friction=physics["dynamic_friction"],

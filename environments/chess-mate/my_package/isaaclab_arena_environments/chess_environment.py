@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import os
 from pathlib import Path
 
 from isaaclab_arena.environments.isaaclab_arena_environment import IsaacLabArenaEnvironment
@@ -23,7 +24,7 @@ class ChessMateEnvironment(ExampleEnvironmentBase):
     def get_env(self, args_cli: argparse.Namespace) -> IsaacLabArenaEnvironment:
         config_arg = getattr(args_cli, "chess_config", None)
         cfg = load_config(config_arg or default_config_path())
-        generated = Path(__file__).resolve().parents[1] / "assets" / "generated"
+        generated = Path(os.environ.get("ROBOCURVE_GENERATED_DIR", str(Path(__file__).resolve().parents[2] / "outputs" / "generated")))
         paths = write_geometry(cfg, generated)
         set_active_config(cfg)
         puzzle = puzzles_for(cfg)[0]
