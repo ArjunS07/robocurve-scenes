@@ -18,6 +18,23 @@ _RUNTIMES: dict[int, list[EpisodeRuntime]] = {}
 _WARNED: set[str] = set()
 
 
+# The frozen NutConfig must not travel through Isaac Lab term params: configclass
+# post-init deep-walks params and tries to assign into it (FrozenInstanceError on
+# the server). Terms read it from here instead, as chess-mate and battery do.
+_ACTIVE_CFG = None
+
+
+def set_active_config(cfg) -> None:
+    global _ACTIVE_CFG
+    _ACTIVE_CFG = cfg
+
+
+def active_config():
+    if _ACTIVE_CFG is None:
+        raise RuntimeError("nut threading config was not registered before the task stepped")
+    return _ACTIVE_CFG
+
+
 def _warn_once(key: str, message: str) -> None:
     if key not in _WARNED:
         _WARNED.add(key)
@@ -166,7 +183,8 @@ def reset_episode_memory(env, env_ids, **_kwargs) -> None:
         runs[index].on_reset()
 
 
-def advance_score_reward(env, cfg):
+def advance_score_reward(env, cfg=None):
+    cfg = cfg if cfg is not None else active_config()
     import torch
 
     from my_package.tasks.capture import maybe_capture
@@ -187,15 +205,18 @@ def _flags(env, cfg, selector) -> "torch.Tensor":
     return torch.tensor(values, dtype=torch.bool, device=env.device)
 
 
-def success_fully_seated(env, cfg):
+def success_fully_seated(env, cfg=None):
+    cfg = cfg if cfg is not None else active_config()
     return _flags(env, cfg, lambda report: report.score >= 100)
 
 
-def failure_off_table(env, cfg):
+def failure_off_table(env, cfg=None):
+    cfg = cfg if cfg is not None else active_config()
     return _flags(env, cfg, lambda report: report.ever_off_table)
 
 
-def failure_fixture_moved(env, cfg):
+def failure_fixture_moved(env, cfg=None):
+    cfg = cfg if cfg is not None else active_config()
     return _flags(env, cfg, lambda report: report.ever_fixture_moved)
 
 

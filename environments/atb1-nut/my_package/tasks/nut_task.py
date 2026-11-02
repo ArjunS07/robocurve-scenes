@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-from functools import partial
-
 from isaaclab_arena.tasks.task_base import TaskBase
 
 
@@ -11,6 +9,9 @@ class NutThreadingTask(TaskBase):
     def __init__(self, cfg):
         super().__init__(episode_length_s=cfg.episode_length_s, task_description=cfg.task_description)
         self.cfg = cfg
+        from my_package.tasks.sim_bridge import set_active_config
+
+        set_active_config(cfg)
 
     def get_scene_cfg(self):
         return None
@@ -36,12 +37,12 @@ class NutThreadingTask(TaskBase):
             success=[
                 CompletionCriteria(
                     name="nut_seated",
-                    predicate_sequence=[partial(success_fully_seated, cfg=self.cfg)],
+                    predicate_sequence=[success_fully_seated],
                 )
             ],
             failures={
-                "off_table": TerminationTermCfg(func=failure_off_table, params={"cfg": self.cfg}),
-                "fixture_moved": TerminationTermCfg(func=failure_fixture_moved, params={"cfg": self.cfg}),
+                "off_table": TerminationTermCfg(func=failure_off_table),
+                "fixture_moved": TerminationTermCfg(func=failure_fixture_moved),
             },
         )
 
@@ -61,7 +62,7 @@ class NutThreadingTask(TaskBase):
 
         from my_package.tasks.sim_bridge import advance_score_reward
 
-        term = RewardTermCfg(func=advance_score_reward, weight=0.0, params={"cfg": self.cfg})
+        term = RewardTermCfg(func=advance_score_reward, weight=0.0)
         return make_configclass("NutRewardsCfg", [("advance_nut_score", RewardTermCfg, term)])()
 
     def get_viewer_cfg(self):

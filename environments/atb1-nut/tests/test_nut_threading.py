@@ -755,3 +755,13 @@ class RuntimeAndLaunchTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TaskTermParamsTests(unittest.TestCase):
+    def test_frozen_config_is_not_passed_through_term_params(self):
+        # Isaac Lab's configclass post-init assigns into params and raised
+        # FrozenInstanceError on the server when the NutConfig was passed there.
+        text = (Path(__file__).resolve().parents[1] / "my_package" / "tasks" / "nut_task.py").read_text()
+        self.assertNotIn('params={"cfg"', text)
+        self.assertNotIn("partial(", text)
+        self.assertIn("set_active_config(cfg)", text)
