@@ -443,7 +443,7 @@ def main() -> None:
             finger_cmd[side] = cfg.robot.finger_open_m
             above = reach(side, (x, y, z + args.approach_m), orient=True)
             at = reach(side, (x, y, z), orient=True)
-            boxes = _stage({}, "boxes", lambda: grasp_geometry(side, name))["boxes"]
+            boxes = _stage({}, "boxes", lambda: grasp_geometry(side, name))
             finger_cmd[side] = cfg.robot.finger_closed_m
             step(int(1.0 / dt))
             fingers = [round(float(_tensor(robots[side].data.joint_pos)[0, j]), 4) for j in arm[side]["fingers"]]
