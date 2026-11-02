@@ -1,0 +1,11 @@
+puzzle 0
+8 r . b q r k . .
+7 p p p p . p . .
+6 . . . n b . p .
+5 . . . . p n . p
+4 . . . . . . P .
+3 . . . . . P . P
+2 P P P P P . . .
+1 R N B Q K B N R
+  a b c d e f g h
+side black

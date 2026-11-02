@@ -1,0 +1,72 @@
+#usda 1.0
+(
+    defaultPrim = "piece"
+    metersPerUnit = 1
+    kilogramsPerUnit = 1
+    upAxis = "Z"
+    doc = "Provisional king. Origin is the center of the bottom face. The mesh stays inside the base radius."
+)
+
+def Xform "piece" (
+    prepend apiSchemas = ["PhysicsRigidBodyAPI", "PhysicsMassAPI", "PhysxRigidBodyAPI"]
+)
+{
+    float physics:mass = 0.02
+    float physics:staticFriction = 0.55
+    float physics:dynamicFriction = 0.4
+    float physics:restitution = 0.02
+    int physxRigidBody:solverPositionIterationCount = 16
+    int physxRigidBody:solverVelocityIterationCount = 1
+    def Cylinder "base" (
+        prepend apiSchemas = ["PhysicsCollisionAPI"]
+    )
+    {
+        uniform token axis = "Z"
+        double height = 0.01116
+        double radius = 0.011
+        double3 xformOp:translate = (0, 0, 0.00558)
+        uniform token[] xformOpOrder = ["xformOp:translate"]
+        color3f[] primvars:displayColor = [(0.12, 0.1, 0.09)]
+        float physxCollision:contactOffset = 0.0003
+    }
+    def Cylinder "stem" (
+        prepend apiSchemas = ["PhysicsCollisionAPI"]
+    )
+    {
+        uniform token axis = "Z"
+        double height = 0.02604
+        double radius = 0.00462
+        double3 xformOp:translate = (0, 0, 0.02418)
+        uniform token[] xformOpOrder = ["xformOp:translate"]
+        color3f[] primvars:displayColor = [(0.12, 0.1, 0.09)]
+        float physxCollision:contactOffset = 0.0003
+    }
+    def Cylinder "head" (
+        prepend apiSchemas = ["PhysicsCollisionAPI"]
+    )
+    {
+        uniform token axis = "Z"
+        double height = 0.01984
+        double radius = 0.00792
+        double3 xformOp:translate = (0, 0, 0.04712)
+        uniform token[] xformOpOrder = ["xformOp:translate"]
+        color3f[] primvars:displayColor = [(0.12, 0.1, 0.09)]
+        float physxCollision:contactOffset = 0.0003
+    }
+    def Cube "cross_up"
+    {
+        double size = 1
+        double3 xformOp:translate = (0, 0, 0.058965)
+        float3 xformOp:scale = (0.00121, 0.00121, 0.0055)
+        uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:scale"]
+        color3f[] primvars:displayColor = [(0.12, 0.1, 0.09)]
+    }
+    def Cube "cross_bar"
+    {
+        double size = 1
+        double3 xformOp:translate = (0, 0, 0.059515)
+        float3 xformOp:scale = (0.0055, 0.00121, 0.00121)
+        uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:scale"]
+        color3f[] primvars:displayColor = [(0.12, 0.1, 0.09)]
+    }
+}

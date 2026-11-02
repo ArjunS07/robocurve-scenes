@@ -1,0 +1,35 @@
+#usda 1.0
+(
+    defaultPrim = "marks"
+    metersPerUnit = 1
+    upAxis = "Z"
+    doc = "Visual table marks only. No physics, no collision, no joints."
+)
+
+def Xform "marks"
+{
+    def Cube "remote_mark"
+    {
+        double size = 1
+        double3 xformOp:translate = (0.4325, 0, 0.7505)
+        float3 xformOp:scale = (0.245, 0.06, 0.0004)
+        uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:scale"]
+        color3f[] primvars:displayColor = [(0.1, 0.45, 0.2)]
+    }
+    def Cube "battery_a_mark"
+    {
+        double size = 1
+        double3 xformOp:translate = (0.5, -0.09, 0.7505)
+        float3 xformOp:scale = (0.0505, 0.0165, 0.0004)
+        uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:scale"]
+        color3f[] primvars:displayColor = [(0.1, 0.35, 0.55)]
+    }
+    def Cube "battery_b_mark"
+    {
+        double size = 1
+        double3 xformOp:translate = (0.5, 0.09, 0.7505)
+        float3 xformOp:scale = (0.0505, 0.0165, 0.0004)
+        uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:scale"]
+        color3f[] primvars:displayColor = [(0.1, 0.35, 0.55)]
+    }
+}

@@ -1,0 +1,136 @@
+# Provisional chess mate-in-one parameters.
+# Nothing here is hardware-calibrated or taken from measured CAD.
+# The mating move is not stored in this file. The scorer derives it.
+
+light_intensity: 2000.0
+
+# The photographed set is a light-wood 3-in-1 chess, checkers, and tic-tac-toe board
+# with dark squares and turned pieces. These sizes are a likeness, not that product's drawing.
+fen_sequence:
+  - "r1bqrk2/pppp1p2/3nb1p1/4pn1p/6P1/5P1P/PPPPP3/RNBQKBNR b KQ - 0 2"
+
+white_rgb: [0.86, 0.75, 0.55]
+black_rgb: [0.12, 0.10, 0.09]
+frame_rgb: [0.76, 0.58, 0.36]
+light_square_rgb: [0.84, 0.70, 0.48]
+dark_square_rgb: [0.10, 0.10, 0.11]
+
+board:
+  # 32 mm squares and a 28 mm border. Overall about 312 mm. Provisional.
+  square_m: 0.032
+  border_m: 0.028
+  thickness_m: 0.014
+  mass_kg: 0.55
+  static_friction: 0.55
+  dynamic_friction: 0.40
+  restitution: 0.02
+  contact_offset_m: 0.0003
+  solver_position_iterations: 16
+  solver_velocity_iterations: 1
+
+pieces:
+  - role: king
+    height_m: 0.062
+    base_radius_m: 0.011
+    mass_kg: 0.020
+  - role: queen
+    height_m: 0.054
+    base_radius_m: 0.0105
+    mass_kg: 0.018
+  - role: bishop
+    height_m: 0.048
+    base_radius_m: 0.010
+    mass_kg: 0.014
+  - role: knight
+    height_m: 0.044
+    base_radius_m: 0.010
+    mass_kg: 0.015
+  - role: rook
+    height_m: 0.040
+    base_radius_m: 0.0105
+    mass_kg: 0.016
+  - role: pawn
+    height_m: 0.032
+    base_radius_m: 0.0085
+    mass_kg: 0.008
+
+scoring:
+  lift_clearance_m: 0.015
+  board_motion_tolerance_m: 0.005
+  board_yaw_tolerance_deg: 5.0
+  upright_angle_deg: 12.0
+  rest_z_tolerance_m: 0.004
+  center_tolerance_m: 0.001
+  grasp_radius_m: 0.055
+  hold_open_fraction_max: 0.35
+  episode_length_s: 90.0
+
+table:
+  # Provisional guess. maple_table_robolab's top height is not in the Arena 0.3.1 tag.
+  top_z_m: 0.75
+  center_xy: [0.35, 0.0]
+  half_extents_xy: [0.60, 0.45]
+  fall_below_m: 0.05
+
+# Identity quaternion is xyzw. Rank 1 is toward -X, which is the robot side.
+board_pose:
+  position_xyz: [0.48, 0.0, 0.757]
+  rotation_xyzw: [0.0, 0.0, 0.0, 1.0]
+
+cameras:
+  - name: overhead_cam
+    eye_xyz: [0.48, 0.0, 1.35]
+    target_xyz: [0.48, 0.0, 0.76]
+    rotation_xyzw: [1.0, 0.0, 0.0, 0.0]
+    width: 256
+    height: 256
+    focal_length: 2.1
+    focus_distance: 40.0
+    horizontal_aperture: 5.376
+    vertical_aperture: 3.024
+  - name: front_cam
+    eye_xyz: [1.05, 0.0, 1.05]
+    target_xyz: [0.48, 0.0, 0.78]
+    rotation_xyzw: [-0.5975128334895923, 0.5975128334895922, 0.3781248653754985, -0.3781248653754985]
+    width: 256
+    height: 256
+    focal_length: 2.1
+    focus_distance: 40.0
+    horizontal_aperture: 5.376
+    vertical_aperture: 3.024
+  - name: side_cam
+    eye_xyz: [0.48, -0.70, 1.00]
+    target_xyz: [0.48, 0.0, 0.78]
+    rotation_xyzw: [0.0, 0.8061720029684715, 0.5916812500238644, 0.0]
+    width: 256
+    height: 256
+    focal_length: 2.1
+    focus_distance: 40.0
+    horizontal_aperture: 5.376
+    vertical_aperture: 3.024
+
+robot:
+  usda_path: /home/ubuntu/workspace/robocurve/assets/yam/yam_source_resolved/yam_source_resolved.usda
+  arm_layout: duplicated_single_arm
+  home_arm_rad: [0.4, 1.2, 1.0, -0.5, 0.0, 0.0]
+  finger_closed_m: 0.0
+  finger_open_m: -0.04695
+  home_open_fraction: 1.0
+  arm_action_scale: 1.0
+  gripper_action_scale: 1.0
+  proximal_stiffness: 80.0
+  proximal_damping: 8.0
+  distal_stiffness: 20.0
+  distal_damping: 2.0
+  finger_stiffness: 40.0
+  finger_damping: 2.0
+  arm_effort_limit: 20.0
+  arm_velocity_limit: 3.0
+  finger_effort_limit: 10.0
+  finger_velocity_limit: 0.2
+  left_pose:
+    position_xyz: [-0.05, 0.22, 0.75]
+    rotation_xyzw: [0.0, 0.0, 0.0, 1.0]
+  right_pose:
+    position_xyz: [-0.05, -0.22, 0.75]
+    rotation_xyzw: [0.0, 0.0, 0.0, 1.0]

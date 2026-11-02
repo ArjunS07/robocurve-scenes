@@ -1,0 +1,186 @@
+# Provisional battery-insertion parameters.
+# Nothing here is hardware-calibrated or taken from measured CAD.
+# Comments are not loaded. Every numeric key below is read strictly.
+
+# false builds both slots. The launch flag --single_slot overrides this.
+single_slot: false
+
+# Provisional dome intensity passed to Arena's light.set_intensity. Not a measured lux value.
+light_intensity: 2000.0
+
+battery:
+  # Provisional AAA body. A typical AAA cell is about 10.5 mm by 44.5 mm.
+  diameter_m: 0.0105
+  length_m: 0.0445
+  mass_kg: 0.0115
+  # Visual positive nub only. It has no collision, so it does not fight the plunger.
+  nub_radius_m: 0.0022
+  nub_length_m: 0.0015
+  # Provisional friction. Not measured on a real cell or on this table.
+  static_friction: 0.40
+  dynamic_friction: 0.30
+  restitution: 0.0
+
+compartment:
+  # Battery-bay collision size, meters. +X is the open mouth at the handle end.
+  # The bay stays 140 x 50 x 22 mm so the insertion clearances stay valid.
+  size_xyz: [0.140, 0.050, 0.022]
+  # Full wand length. Provisional likeness of the listed Angrox/LG-style remote
+  # (ASIN B07T4N7NTX), whose page gives 23.5 x 4.8 x 2.4 cm. Not that product's CAD.
+  # The extra length is a solid nose past the back stop. The mouth stays open.
+  silhouette_length_m: 0.235
+  mass_kg: 0.080
+  static_friction: 0.50
+  dynamic_friction: 0.40
+  restitution: 0.0
+  # x stations in the remote frame. rear < back stop < seat < lip end < mouth <= front.
+  rear_face_x: -0.090
+  back_face_x: -0.032
+  seat_center_x: -0.00875
+  lip_end_x: 0.016
+  mouth_x: 0.030
+  front_face_x: 0.050
+  # Channel is wider than the cell. The floor is at -channel_z_half.
+  channel_z_half: 0.0065
+  channel_y_half: 0.0065
+  # Side lips leave an 8 mm top opening, narrower than the 10.5 mm cell.
+  lip_side_intrusion: 0.0025
+  lip_z_bottom: 0.003
+  # Plunger is narrower than the 8 mm lip opening so it does not share a face with the lips.
+  # y size 0.007 leaves 0.5 mm to each lip. z size 0.004 stays 1 mm below the lip.
+  plunger_size_xyz: [0.004, 0.007, 0.004]
+  plunger_center_x: 0.0135
+  plunger_mass_kg: 0.002
+  # Travel must exceed the seated overlap and still leave a restoring push. Provisional.
+  plunger_travel_m: 0.004
+  plunger_stiffness: 220.0
+  plunger_damping: 6.0
+  plunger_effort_limit_n: 5.0
+  plunger_velocity_limit_m_s: 0.05
+  # Flat-cap contact uses this distance, not the cell radius.
+  spring_contact_distance_m: 0.0005
+  # Must stay below the ~1 mm clearances. Arena's 5 mm procedural default would glue the cell.
+  contact_offset_m: 0.0003
+  solver_position_iterations: 16
+  solver_velocity_iterations: 1
+  slots:
+    # Slot A keeps the starting +X polarity. Slot B is the opposite end of a series pair.
+    - name: battery_a
+      center_y_m: -0.012
+      required_axis_xyz: [1.0, 0.0, 0.0]
+    - name: battery_b
+      center_y_m: 0.012
+      required_axis_xyz: [-1.0, 0.0, 0.0]
+
+scoring:
+  # The cell must stay seated, oriented, and released for this long. Provisional.
+  retention_window_s: 1.0
+  # Lowest point of the cell must clear the table top by this much to count as lifted.
+  lift_clearance_m: 0.015
+  # Hard failure if the remote origin leaves its mark by more than this. Provisional.
+  remote_motion_tolerance_m: 0.005
+  remote_yaw_tolerance_deg: 5.0
+  # PROXY only. This is a contact-force threshold, not a model of visible damage.
+  damage_force_proxy_n: 30.0
+  # A finger counts as holding when the gripper body is this close and the fingers are shut.
+  grasp_radius_m: 0.04
+  hold_open_fraction_max: 0.35
+  polarity_angle_deg: 20.0
+  # Full seat when depth is within this of (mouth_x - seat_center_x).
+  axial_tolerance_m: 0.0015
+  # Resting center is 1.25 mm below the channel axis, so the allowance must exceed that.
+  seat_radial_max_m: 0.002
+  episode_length_s: 90.0
+  # Set false if contact-sensor prims abort startup. The damage proxy then stays at 0.
+  enable_contact_sensors: true
+
+table:
+  # Provisional guess. maple_table_robolab's top height is not in the Arena 0.3.1 tag.
+  # The maple asset's own friction is not overridden.
+  top_z_m: 0.75
+  center_xy: [0.35, 0.0]
+  # Half extents give x [-0.25, 0.95] and y [-0.45, 0.45]. Provisional footprint.
+  half_extents_xy: [0.60, 0.45]
+  fall_below_m: 0.05
+
+# Identity quaternion is xyzw (0, 0, 0, 1). Battery quaternion is +90 deg about Y,
+# which maps the cell's local +Z (positive terminal) onto world +X.
+remote_pose:
+  position_xyz: [0.50, 0.00, 0.761]
+  rotation_xyzw: [0.0, 0.0, 0.0, 1.0]
+battery_a_pose:
+  position_xyz: [0.50, -0.090, 0.75525]
+  rotation_xyzw: [0.0, 0.7071067811865475, 0.0, 0.7071067811865476]
+battery_b_pose:
+  position_xyz: [0.50, 0.090, 0.75525]
+  rotation_xyzw: [0.0, 0.7071067811865475, 0.0, 0.7071067811865476]
+
+cameras:
+  # Poses are provisional. Rotations are the ROS optical look-at of eye toward target.
+  # Physics smoke does not spawn them. Pass --enable-cameras to spawn them.
+  - name: overhead_cam
+    eye_xyz: [0.50, 0.00, 1.30]
+    target_xyz: [0.50, 0.00, 0.76]
+    rotation_xyzw: [1.0, 0.0, 0.0, 0.0]
+    width: 256
+    height: 256
+    focal_length: 2.1
+    focus_distance: 40.0
+    horizontal_aperture: 5.376
+    vertical_aperture: 3.024
+  - name: front_cam
+    eye_xyz: [1.05, 0.00, 1.05]
+    target_xyz: [0.50, 0.00, 0.78]
+    rotation_xyzw: [-0.6001402316624453, 0.6001402316624455, 0.3739407738401181, -0.3739407738401181]
+    width: 256
+    height: 256
+    focal_length: 2.1
+    focus_distance: 40.0
+    horizontal_aperture: 5.376
+    vertical_aperture: 3.024
+  - name: side_cam
+    eye_xyz: [0.50, -0.70, 1.00]
+    target_xyz: [0.50, 0.00, 0.78]
+    rotation_xyzw: [0.0, 0.8061720029684715, 0.5916812500238644, 0.0]
+    width: 256
+    height: 256
+    focal_length: 2.1
+    focus_distance: 40.0
+    horizontal_aperture: 5.376
+    vertical_aperture: 3.024
+
+robot:
+  # Reference only. This package does not edit the USDA.
+  usda_path: /home/ubuntu/workspace/robocurve/assets/yam/yam_source_resolved/yam_source_resolved.usda
+  # duplicated_single_arm spawns that USDA twice and expects joint1..joint8 on each.
+  # combined expects one articulation with left_joint* and right_joint* (unconfirmed).
+  # If the live joint list differs, the action term raises and names the joints it found.
+  arm_layout: duplicated_single_arm
+  # Provisional home, radians, inside the source URDF limits. Both arms use it.
+  home_arm_rad: [0.4, 1.2, 1.0, -0.5, 0.0, 0.0]
+  # Source URDF: 0 is closed, negative opens. Station URDF uses the opposite sign.
+  finger_closed_m: 0.0
+  finger_open_m: -0.04695
+  home_open_fraction: 1.0
+  arm_action_scale: 1.0
+  gripper_action_scale: 1.0
+  # Provisional implicit-actuator gains. They are not the motor kp/kd in yam_v1.yml
+  # and they are not a calibration. They override the URDF's placeholder effort of 1
+  # only inside the simulator config. The USDA file is not modified.
+  proximal_stiffness: 80.0
+  proximal_damping: 8.0
+  distal_stiffness: 20.0
+  distal_damping: 2.0
+  finger_stiffness: 40.0
+  finger_damping: 2.0
+  arm_effort_limit: 20.0
+  arm_velocity_limit: 3.0
+  finger_effort_limit: 10.0
+  finger_velocity_limit: 0.2
+  # Bases are provisional. The USDA forward axis was not opened on this machine.
+  left_pose:
+    position_xyz: [-0.05, 0.22, 0.75]
+    rotation_xyzw: [0.0, 0.0, 0.0, 1.0]
+  right_pose:
+    position_xyz: [-0.05, -0.22, 0.75]
+    rotation_xyzw: [0.0, 0.0, 0.0, 1.0]

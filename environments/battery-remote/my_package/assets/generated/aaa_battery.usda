@@ -1,0 +1,37 @@
+#usda 1.0
+(
+    defaultPrim = "battery"
+    metersPerUnit = 1
+    kilogramsPerUnit = 1
+    upAxis = "Z"
+    doc = "Provisional AAA cell. Collision is the cylinder body. The red nub is visual only."
+)
+
+def Xform "battery" (
+    prepend apiSchemas = ["PhysicsRigidBodyAPI", "PhysicsMassAPI", "PhysxRigidBodyAPI"]
+)
+{
+    float physics:mass = 0.0115
+    float physics:staticFriction = 0.4
+    float physics:dynamicFriction = 0.3
+    float physics:restitution = 0
+    def Cylinder "body" (
+        prepend apiSchemas = ["PhysicsCollisionAPI"]
+    )
+    {
+        uniform token axis = "Z"
+        double height = 0.0445
+        double radius = 0.00525
+        color3f[] primvars:displayColor = [(0.72, 0.73, 0.75)]
+        float physxCollision:contactOffset = 0.0003
+    }
+    def Cylinder "positive_nub"
+    {
+        uniform token axis = "Z"
+        double height = 0.0015
+        double radius = 0.0022
+        double3 xformOp:translate = (0, 0, 0.023)
+        uniform token[] xformOpOrder = ["xformOp:translate"]
+        color3f[] primvars:displayColor = [(0.8, 0.05, 0.05)]
+    }
+}

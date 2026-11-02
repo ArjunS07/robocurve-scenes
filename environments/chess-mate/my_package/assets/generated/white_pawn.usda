@@ -1,0 +1,56 @@
+#usda 1.0
+(
+    defaultPrim = "piece"
+    metersPerUnit = 1
+    kilogramsPerUnit = 1
+    upAxis = "Z"
+    doc = "Provisional pawn. Origin is the center of the bottom face. The mesh stays inside the base radius."
+)
+
+def Xform "piece" (
+    prepend apiSchemas = ["PhysicsRigidBodyAPI", "PhysicsMassAPI", "PhysxRigidBodyAPI"]
+)
+{
+    float physics:mass = 0.008
+    float physics:staticFriction = 0.55
+    float physics:dynamicFriction = 0.4
+    float physics:restitution = 0.02
+    int physxRigidBody:solverPositionIterationCount = 16
+    int physxRigidBody:solverVelocityIterationCount = 1
+    def Cylinder "base" (
+        prepend apiSchemas = ["PhysicsCollisionAPI"]
+    )
+    {
+        uniform token axis = "Z"
+        double height = 0.00576
+        double radius = 0.0085
+        double3 xformOp:translate = (0, 0, 0.00288)
+        uniform token[] xformOpOrder = ["xformOp:translate"]
+        color3f[] primvars:displayColor = [(0.86, 0.75, 0.55)]
+        float physxCollision:contactOffset = 0.0003
+    }
+    def Cylinder "stem" (
+        prepend apiSchemas = ["PhysicsCollisionAPI"]
+    )
+    {
+        uniform token axis = "Z"
+        double height = 0.01344
+        double radius = 0.00357
+        double3 xformOp:translate = (0, 0, 0.01248)
+        uniform token[] xformOpOrder = ["xformOp:translate"]
+        color3f[] primvars:displayColor = [(0.86, 0.75, 0.55)]
+        float physxCollision:contactOffset = 0.0003
+    }
+    def Cylinder "head" (
+        prepend apiSchemas = ["PhysicsCollisionAPI"]
+    )
+    {
+        uniform token axis = "Z"
+        double height = 0.01024
+        double radius = 0.00612
+        double3 xformOp:translate = (0, 0, 0.02432)
+        uniform token[] xformOpOrder = ["xformOp:translate"]
+        color3f[] primvars:displayColor = [(0.86, 0.75, 0.55)]
+        float physxCollision:contactOffset = 0.0003
+    }
+}
