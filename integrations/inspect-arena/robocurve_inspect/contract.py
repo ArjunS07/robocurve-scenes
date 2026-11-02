@@ -11,6 +11,8 @@ def array(value):
         value = value.torch
     if hasattr(value, 'detach'):
         value = value.detach().cpu().numpy()
+    if hasattr(value, 'numpy'):
+        value = value.numpy()
     return np.asarray(value)
 
 

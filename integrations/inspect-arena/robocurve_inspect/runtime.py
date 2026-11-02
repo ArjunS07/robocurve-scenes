@@ -151,7 +151,21 @@ def open_scene(args, output):
                 for label, sensor_name in zip(('overhead', 'front', 'side'), sensors):
                     sensor = base.scene[sensor_name]
                     cameras[label] = (sensor_name, int(sensor.cfg.height), int(sensor.cfg.width))
-                adapter = ArenaEmbodiment(env, scene_arms(args.scene, cfg), cameras, report_reader(args.scene))
+                arms=scene_arms(args.scene,cfg)
+                if getattr(args,'control_interface','eef_pos')=='eef_pos':
+                    from .cartesian import CartesianEmbodiment
+                    rig_docs=''
+                    table=getattr(cfg,'table',None)
+                    if table is not None:
+                        rig_docs=f'Table surface world Z={table.top_z_m} m. '
+                    board=getattr(cfg,'board_pose',None)
+                    if board is not None:
+                        rig_docs+=f'Board center world XYZ={tuple(board.position_xyz)} m. '
+                        rig_docs+='White home rank is toward world -X; files a to h run toward world -Y. '
+                    adapter=CartesianEmbodiment(env,arms,cameras,report_reader(args.scene),rig_docs=rig_docs)
+                    adapter.control_report_path=output/'control_setup.json'
+                else:
+                    adapter=ArenaEmbodiment(env,arms,cameras,report_reader(args.scene))
                 controller = getattr(base, 'viewport_camera_controller', None)
                 if controller is not None:
                     controller.update_view_location()

@@ -87,6 +87,8 @@ class ArenaEmbodiment:
         self._done = True
         self._closed = False
         self.instruction = ''
+        self.command_state_key = 'joint_command_state'
+        self.last_result = None
         # The launcher's pre-reset recorder invokes this before the scene clears task state.
         self.base._robocurve_inspect_capture = self.capture_terminal
 
@@ -134,6 +136,12 @@ class ArenaEmbodiment:
         if self._in_step:
             self._terminal = (self.observe(), self._report())
 
+    def _on_reset(self):
+        pass
+
+    def _joint_target(self, target):
+        return target
+
     def reset(self, scene, *, seed=None):
         if self._closed:
             raise RuntimeError('Adapter is closed')
@@ -141,8 +149,10 @@ class ArenaEmbodiment:
         self._in_step = False
         self._terminal = None
         self.env.reset(seed=seed)
+        self._on_reset()
         observation = self.observe()
-        self._last_target = observation.state['joint_command_state'].copy()
+        self._last_target = observation.state[self.command_state_key].copy()
+        self.last_result = None
         self._done = False
         return observation
 
@@ -150,7 +160,8 @@ class ArenaEmbodiment:
         if self._done or self._closed:
             raise RuntimeError('Reset the adapter before stepping, including after termination')
         target = validate_target(action.data, self.low, self.high, self._last_target, self.max_step)
-        native = np.concatenate([arm.native(target[i * 7:(i + 1) * 7]) for i, arm in enumerate(self.arms)])
+        joint_target = self._joint_target(target)
+        native = np.concatenate([arm.native(joint_target[i * 7:(i + 1) * 7]) for i, arm in enumerate(self.arms)])
         self._terminal = None
         self._in_step = True
         try:
@@ -168,6 +179,10 @@ class ArenaEmbodiment:
             observation, report = self.observe(), self._report()
         success = terminated and not report['hard_failure'] and report['score'] == 100
         reason = 'success' if success else ('task_failure' if terminated else ('time_limit' if truncated else None))
+        self.last_result = {'termination_reason': reason, 'terminated': terminated, 'truncated': truncated,
+                            'task_score': report['score'], 'task_report': report}
+        if self._done:
+            print(f"Episode ended: {reason}; score={report['score']}; details={report.get('hard_reasons', [])}", flush=True)
         return StepResult(observation, reward=float(array(reward).reshape(-1)[0]), terminated=terminated,
                           truncated=truncated, termination_reason=reason,
                           info={'success': success, 'task_score': report['score'], 'task_report': report})

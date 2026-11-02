@@ -25,8 +25,9 @@ def create_agent_policy(model, max_llm_calls, *, transport=None, env=None):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--scene', choices=('chess-mate', 'battery-remote', 'atb1-nut'), required=True)
-    parser.add_argument('--mode', choices=('capture', 'hold', 'agent'), default='capture')
+    parser.add_argument('--mode', choices=('capture', 'hold', 'agent', 'reach-check'), default='capture')
     parser.add_argument('--steps', type=int, default=50)
+    parser.add_argument('--control-interface', choices=('eef_pos','joints'), default='eef_pos')
     parser.add_argument('--episode-seconds', type=float,
                         help='Override simulation-time timeout for this run; recorded as modified task timing')
     parser.add_argument('--arena-root', type=Path, default=Path('/home/ubuntu/workspace/IsaacLab-Arena'))
@@ -43,6 +44,8 @@ def main():
         parser.error('--steps and --max-llm-calls must be positive')
     if args.episode_seconds is not None and (not math.isfinite(args.episode_seconds) or args.episode_seconds <= 0):
         parser.error('--episode-seconds must be positive and finite')
+    if args.mode=='reach-check' and args.control_interface!='eef_pos':
+        parser.error('reach-check requires --control-interface eef_pos')
     if args.stream and not args.public_ip:
         parser.error('--stream needs --public-ip or PUBLIC_IP')
     try:
@@ -51,11 +54,11 @@ def main():
             from inspect_robots_agent.policy import LLMAgentPolicy
     except ImportError as exc:
         parser.error(f'Use the existing Arena interpreter with Inspect installed: {exc}')
-    # Camera recording is mandatory for agent runs: reject an unusable encoder
+    # Camera recording is mandatory for agent/reach-check runs: reject an unusable encoder
     # before prompting for a key, creating Kit, or making any model request.
     from robocurve_inspect.video import require_ffmpeg, export_recording
     encoder = None
-    if args.mode == 'agent':
+    if args.mode in ('agent','reach-check'):
         try:
             encoder = require_ffmpeg(args.ffmpeg)
         except RuntimeError as exc:
@@ -80,14 +83,15 @@ def main():
     output = output.resolve()
     output.mkdir(parents=True, exist_ok=False)
     provenance = {'scene': args.scene, 'mode': args.mode, 'python': sys.executable,
+                  'control_interface':args.control_interface,
                   'model': args.model if args.mode == 'agent' else None,
                   'endpoint': 'https://openrouter.ai/api/v1' if args.mode == 'agent' else None,
                   'task_clock': 'simulation time; model inference does not advance physics',
                   'requested_episode_seconds': args.episode_seconds,
                   'requested_max_environment_steps': args.steps,
                   'max_llm_calls': args.max_llm_calls if args.mode == 'agent' else None,
-                  'video': {'enabled': args.mode == 'agent', 'encoder': encoder,
-                            'composite': 'rollout.mp4' if args.mode == 'agent' else None},
+                  'video': {'enabled': args.mode in ('agent','reach-check'), 'encoder': encoder,
+                            'composite': 'rollout.mp4' if args.mode in ('agent','reach-check') else None},
                   'versions': {}}
     repo = Path(__file__).resolve().parents[2]
     try:
@@ -114,7 +118,22 @@ def main():
               f"up to {provenance['effective_max_environment_steps']} steps; "
               f"model-call limit: {provenance['max_llm_calls']}", flush=True)
         scene = Scene(id=args.scene, instruction=instruction)
-        if args.mode == 'agent':
+        if args.mode == 'reach-check':
+            from robocurve_inspect.probe import run_reach_check
+            probe_failed=False
+            try:
+                report=run_reach_check(adapter,scene,output,provenance['effective_max_environment_steps'])
+                print(f"Reach check passed: {report['passed']}; report: {output/'reach_check.json'}",flush=True)
+            except BaseException:
+                probe_failed=True
+                raise
+            finally:
+                try:
+                    export_recording(output,encoder,adapter.info.control_hz)
+                except Exception as exc:
+                    print(str(exc),file=sys.stderr,flush=True)
+                    if not probe_failed: raise
+        elif args.mode == 'agent':
             task = Task(name=args.scene, scenes=[scene], scorer=[ArenaTaskScore(), success_at_end()],
                         max_steps=min(args.steps, max_episode))
             rollout_failed = False
@@ -128,6 +147,8 @@ def main():
             finally:
                 # Export before leaving the Kit context: its exception handler
                 # can terminate the process. Do not mask the rollout's error.
+                if adapter.last_result is not None:
+                    (output/'last_task_result.json').write_text(json.dumps(adapter.last_result,indent=2)+'\n')
                 print('Exporting camera MP4s from saved frames...', flush=True)
                 try:
                     export_recording(output, encoder, adapter.info.control_hz)
@@ -140,7 +161,7 @@ def main():
             save_capture(output / 'initial', observation, adapter.info, adapter._report())
             count = min(args.steps, 2) if args.mode == 'capture' else args.steps
             # Hold the measured initial state; never issue an arbitrary zero absolute target.
-            target = observation.state['joint_command_state'].copy()
+            target = observation.state[adapter.command_state_key].copy()
             for index in range(count):
                 result = adapter.step(Action(data=target))
                 observation = result.observation

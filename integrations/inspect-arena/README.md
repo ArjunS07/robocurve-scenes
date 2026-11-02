@@ -9,9 +9,31 @@ Local tests use the exact reported server SDK versions, built from Inspect Robot
 - `inspect-robots 0.0.1.dev1+gc8a821ba7`
 - `inspect-robots-agent 0.29.0`
 
-24 tests pass with fake simulator data, including the real agent with a mocked OpenRouter response and the real Inspect eval/logging loop. No paid calls occur in these tests.
+33 tests pass with fake simulator data, including the real agent with a mocked OpenRouter response and the real Inspect eval/logging loop. No paid calls occur in these tests.
 
-**The Arena bootstrap, live camera rendering, and terminal recorder hook still require a server GPU run.** A broken scene still needs to be fixed in that scene. This integration does not make a successful manipulation policy or an IK planner.
+The server has verified the scene/camera bootstrap, Argon communication, raw-joint motion, and MP4 export. **The new Cartesian control path and live CAD/Jacobian calibration still require the server reach check below.** A broken scene still needs to be fixed in that scene. Passing the reach check establishes local tracking, not a successful piece grasp or chess benchmark.
+
+## Cartesian control and the first server check
+
+`--control-interface eef_pos` is now the default. It uses the documented Inspect YAM 14-D Cartesian interface and the existing agent's `move_to` tool. For each arm the labels are `x, y, z, yaw, pitch, roll, gripper`. Positions are metres in that arm's measured base frame. Yaw/pitch/roll are absolute offsets from the reset tool orientation (`Rz(yaw) @ Ry(-pitch) @ Rx(roll) @ R_reset`); 0 preserves that orientation. Each gripper is independently 0 closed / 1 open.
+
+The simulator backend uses the loaded YAM USD's measured body poses and PhysX Jacobians, including floating-base columns on the world-anchored asset, rather than installing or connecting a CAN hardware driver. The tool point is derived from the loaded distal finger mesh geometry with a 2 mm pad inset. It is not the wrist or the finger-joint origins. Reset writes `control_setup.json` with that offset, its CAD bounds, measured poses, and reference orientations. Unexpected geometry/Jacobians fail before any model call.
+
+Run this first with your own preview stopped:
+
+```bash
+cd /home/ubuntu/workspace/robocurve-scenes
+/home/ubuntu/workspace/IsaacLab-Arena/.venv/bin/python \
+  integrations/inspect-arena/run_inspect.py --scene chess-mate \
+  --mode reach-check --control-interface eef_pos --steps 480 \
+  --stream --public-ip 160.211.46.91
+```
+
+This makes zero model calls. It raises each grasp point 15 mm, closes its gripper by 10%, reopens it, and returns it while the other arm holds. It records the measured position/orientation/opening errors in `reach_check.json`, saves all three frame streams, and exports `rollout.mp4`. A phase fails when tracking does not settle within 3 mm, 0.04 rad, and 0.03 normalized opening, or when the task terminates. Inspect both the report and the video before a paid task attempt.
+
+The measured `eef_state` drives Cartesian interpolation. Observations also retain joint angles, both world base transforms, world grasp positions, and tool-axis directions. Native Arena action mapping, cameras, scoring and MP4 recording are retained. `last_task_result.json` saves the last task score and hard-failure reasons; terminal reasons are printed too.
+
+For diagnostics only, `--control-interface joints` retains the earlier raw joint interface. Cartesian controls have per-step limits of 2 mm, 0.04 rad and 0.05 opening, and the IK joint command changes are limited to 0.025 rad. These are local servo limits, not arm/table collision planning. Unreachable targets can leave a measurable residual and must not be reported as reached.
 
 ## First run: real camera capture, no model calls
 
@@ -62,7 +84,7 @@ Inspect logs, frame sidecars and agent transcripts go into the run's `inspect/` 
 
 ## Default MP4 recording for agent runs
 
-Agent mode checks FFmpeg and the H.264 encoder before prompting for a key or starting the simulator. It uses FFmpeg from PATH, an already-installed `imageio_ffmpeg` binary, or `--ffmpeg /absolute/path/to/ffmpeg`. If none works, the run stops before making model calls.
+Agent and reach-check modes check FFmpeg and the H.264 encoder before prompting for a key or starting the simulator. It uses FFmpeg from PATH, an already-installed `imageio_ffmpeg` binary, or `--ffmpeg /absolute/path/to/ffmpeg`. If none works, the run stops before making model calls.
 
 After a normal end, policy give-up, handled error, or a single Ctrl+C, the launcher exports saved sensor frames before shutting down Kit:
 
@@ -93,9 +115,9 @@ This changes only the current environment's timeout before Lab creates it. It le
 
 The saved `run.json` records the configured and effective episode durations, whether task timing was modified, the effective step budget, control rate, and model-call cap. Camera frames, actions, Inspect logs, and the default MP4s are saved as usual. A 120-second chess run uses modified task timing; it is not the original 90-second task setting.
 
-## Action and observation contract
+## Native joint mapping beneath Cartesian control
 
-The outward action has 14 explicitly named **absolute** targets:
+The explicit `--control-interface joints` interface has 14 absolute targets:
 
 ```text
 left_joint1 ... left_joint6, left_gripper_open,
@@ -138,5 +160,7 @@ No Isaac imports, GPU, API key, or external model call is needed. Temporary test
 ## References
 
 - https://github.com/robocurve/inspect-robots
+- https://github.com/robocurve/inspect-robots-yam#cartesian-eef-mode
+- https://github.com/isaac-sim/IsaacLab/blob/main/scripts/tutorials/05_controllers/run_diff_ik.py
 - https://openrouter.ai/google/gemini-4-argon
 - https://isaac-sim.github.io/IsaacLab-Arena/release/0.3.1/
