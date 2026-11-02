@@ -289,7 +289,13 @@ def main() -> None:
         compressed = plunger(slot.name)
         targets[slot.name] = 0.0
         run(args.hold_s)
-        return {"spring_compressed_before_release_mm": round(1000 * compressed, 3), **fit(name, slot)}
+        held = getattr(remote.data, "joint_pos_target", None)
+        target_seen = None if held is None else round(1000 * float(_tensor(held)[0, joint_ids[slot.name]]), 4)
+        return {
+            "spring_compressed_before_release_mm": round(1000 * compressed, 3),
+            "plunger_target_in_sim_mm": target_seen,
+            **fit(name, slot),
+        }
 
     def capture(prefix, views):
         if camera is None:
@@ -330,6 +336,9 @@ def main() -> None:
             axis = rotate(rotation, (0.0, 0.0, 1.0))
             rows[name] = {
                 "xy_drift_mm": round(1000 * math.hypot(position[0] - start.position_xyz[0], position[1] - start.position_xyz[1]), 3),
+                # Direction of the drift: a rolling cylinder moves across its axis.
+                "drift_xy_mm": [round(1000 * (position[i] - start.position_xyz[i]), 3) for i in range(2)],
+                "speed_mm_s": round(1000 * float(torch.linalg.norm(_tensor(cells[name].data.root_lin_vel_w)[0])), 3),
                 "z_minus_rest_mm": round(1000 * (position[2] - start.position_xyz[2]), 3),
                 "axis": [round(v, 4) for v in axis],
             }
@@ -376,6 +385,42 @@ def main() -> None:
 
     _stage(report, "robots", robot_report)
     _stage(report, "settle", settle)
+
+    def spring_free_return():
+        """Compress each plunger with no cell in the slot, release the target, and watch it return.
+
+        Isolates the drive from the cell: if a free plunger does not return to 0, the drive or
+        the joint is wrong; if it does, a seated cell is jamming it.
+        """
+        def joint_row(slot):
+            index = joint_ids[slot.name]
+            row = {
+                "pos_mm": round(1000 * plunger(slot.name), 4),
+                "vel_mm_s": round(1000 * float(_tensor(remote.data.joint_vel)[0, index]), 4),
+            }
+            for attr in ("joint_pos_target", "applied_torque", "computed_torque"):
+                value = getattr(remote.data, attr, None)
+                if value is not None:
+                    row[attr] = round(float(_tensor(value)[0, index]), 6)
+            return row
+
+        result = {}
+        for slot in slots:
+            targets[slot.name] = compartment.plunger_travel_m * 0.98
+        run(0.4)
+        result["compressed"] = {slot.name: joint_row(slot) for slot in slots}
+        for slot in slots:
+            targets[slot.name] = 0.0
+        trace = []
+        for k in range(int(0.6 / dt)):
+            step()
+            if k in (0, 1, 2, 5, 10, 20, 40, 70):
+                trace.append({"t_s": round((k + 1) * dt, 4), **{slot.name: joint_row(slot) for slot in slots}})
+        result["after_release"] = trace
+        result["returned_to_zero"] = {slot.name: abs(plunger(slot.name)) < 2e-4 for slot in slots}
+        return result
+
+    _stage(report, "spring_free_return", spring_free_return)
     _stage(report, "renders_start", lambda: capture("start_", views))
 
     names = list(cells)
