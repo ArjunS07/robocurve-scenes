@@ -83,7 +83,12 @@ def main() -> None:
         default=0.05,
         help="Turning-torque cap in N m. The old 2 mN m cap stalled the nut at a seam; a hand or gripper gives far more.",
     )
-    parser.add_argument("--turn-rate", type=float, default=0.5, help="Target turns per second.")
+    parser.add_argument("--turn-rate", type=float, default=0.25, help="Target turns per second.")
+    parser.add_argument(
+        "--torque-sweep",
+        default="0.002,0.005,0.01,0.02",
+        help="Comma-separated torque caps (N m) tried in a sweep before the main stages; '' skips it.",
+    )
     parser.add_argument("--width", type=int, default=1280)
     parser.add_argument("--height", type=int, default=720)
     parser.add_argument("--out", type=Path, default=None)
@@ -385,6 +390,40 @@ def main() -> None:
             "first_0.1s": early,
             "samples": samples[-4:],
         }
+
+    def torque_sweep():
+        """Re-engage and advance at each cap. 0afbd1a..ce61035 showed a narrow window:
+        2 mN m tracked the helix but stalled; 50 mN m spun the nut through the ridge."""
+        rows = {}
+        for cap in [float(v) for v in args.torque_sweep.split(",") if v.strip()]:
+            args.max_torque = cap
+            engage()
+            before = read()
+            goal = before["clockwise_turns"] + args.turns
+            timeout = 4.0 * args.turns / args.turn_rate
+            state, samples = advance(timeout, torque_fn=spin(args.turn_rate), released=False, until=lambda s: s["clockwise_turns"] >= goal)
+            turns = state["clockwise_turns"] - before["clockwise_turns"]
+            descent = before["gap_m"] - state["gap_m"]
+            ideal = [before["gap_m"] - f.pitch_m * (smp["cw_turns"] - round(before["clockwise_turns"], 4)) for smp in samples]
+            deviation = max((abs(smp["gap_mm"] / 1000 - g) for smp, g in zip(samples, ideal)), default=0.0)
+            rows[f"{cap * 1000:g}_mNm"] = {
+                "cap_n_m": cap,
+                "reached_goal": state["clockwise_turns"] >= goal,
+                "turns": round(turns, 3),
+                "descent_per_turn_mm": round(descent / turns * 1000, 3) if turns > 0.05 else None,
+                "max_helix_deviation_mm": round(deviation * 1000, 3),
+                "max_tilt_deg": max((smp["tilt_deg"] for smp in samples), default=None),
+            }
+        # Best cap: reached the goal while staying on the helix; else the least deviation.
+        tracking = [r for r in rows.values() if r["reached_goal"] and r["max_helix_deviation_mm"] < 0.5 * f.pitch_m * 1000]
+        pool = tracking or list(rows.values())
+        best = min(pool, key=lambda r: (not r["reached_goal"], r["max_helix_deviation_mm"])) if pool else None
+        if best is not None:
+            args.max_torque = best["cap_n_m"]
+        return {"trials": rows, "chosen_cap_n_m": args.max_torque, "a_cap_tracks_the_thread": bool(tracking)}
+
+    if args.torque_sweep.strip():
+        _stage(report, "torque_sweep", torque_sweep)
 
     engaged = _stage(report, "engage", engage)
 
