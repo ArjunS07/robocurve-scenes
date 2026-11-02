@@ -454,10 +454,12 @@ def main() -> None:
         tracking = [r for r in rows.values() if r["reached_goal"] and r["max_helix_deviation_mm"] < 0.5 * f.pitch_m * 1000]
         pool = tracking or list(rows.values())
         # Prefer the highest tracking cap: a robot turns with more than a fingertip's torque.
+        # Without a tracking cap, take the one closest to the helix, not one that merely finished
+        # its turns: b01e670 picked 10 mN m (5 mm off the helix) and the seat stage scored 25.
         best = (
             max(tracking, key=lambda r: r["cap_n_m"])
             if tracking
-            else (min(pool, key=lambda r: (not r["reached_goal"], r["max_helix_deviation_mm"])) if pool else None)
+            else (min(pool, key=lambda r: r["max_helix_deviation_mm"]) if pool else None)
         )
         if best is not None:
             args.max_torque, args.hold_upright = best["cap_n_m"], best["held_upright"]

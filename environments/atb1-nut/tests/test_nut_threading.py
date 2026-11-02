@@ -773,7 +773,7 @@ class TaskTermParamsTests(unittest.TestCase):
 
             nut_usd, fixture_usd = ensure_generated_assets(cfg)
             nut, fixture = Path(nut_usd).read_text(), Path(fixture_usd).read_text()
-        self.assertIn("physxRigidBody:enableSpeculativeCCD = true", nut)
+        self.assertIn(f"physxRigidBody:enableSpeculativeCCD = {'true' if cfg.physics.nut_speculative_ccd else 'false'}", nut)
         self.assertIn("physxRigidBody:maxAngularVelocity = 1440", nut)
         self.assertEqual(nut.count('def Cube "pin_'), cfg.fastener.pin_count)
         # The kinematic fixture does not need either.
