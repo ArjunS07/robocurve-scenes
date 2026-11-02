@@ -9,7 +9,7 @@ Local tests use the exact reported server SDK versions, built from Inspect Robot
 - `inspect-robots 0.0.1.dev1+gc8a821ba7`
 - `inspect-robots-agent 0.29.0`
 
-15 tests pass with fake simulator data, including the real agent with a mocked OpenRouter response and the real Inspect eval/logging loop. No paid calls occur in these tests.
+18 tests pass with fake simulator data, including the real agent with a mocked OpenRouter response and the real Inspect eval/logging loop. No paid calls occur in these tests.
 
 **The Arena bootstrap, live camera rendering, and terminal recorder hook still require a server GPU run.** A broken scene still needs to be fixed in that scene. This integration does not make a successful manipulation policy or an IK planner.
 
@@ -22,6 +22,8 @@ cd /home/ubuntu/workspace/robocurve-scenes
 /home/ubuntu/workspace/IsaacLab-Arena/.venv/bin/python \
   integrations/inspect-arena/run_inspect.py --scene chess-mate --mode capture
 ```
+
+Non-streaming runs explicitly select the installed Isaac Lab headless rendering experience, as the working chess render diagnostic does. A missing or ambiguous rendering experience stops before Kit starts.
 
 The default mode enables the three actual sensor cameras, holds the measured robot pose for two steps, saves initial/latest sensor images and state, and exits. No API key is needed.
 

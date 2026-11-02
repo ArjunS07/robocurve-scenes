@@ -14,6 +14,24 @@ SCENES = {
 }
 
 
+def rendering_args(arena_root, stream):
+    """Enable RTX camera rendering using this installed Lab's experience file."""
+    if stream:
+        return ['--livestream', '1']
+    apps = Path(arena_root) / 'submodules' / 'IsaacLab' / 'apps'
+    candidates = sorted(path for path in apps.glob('*.kit')
+                        if 'headless' in path.name and 'rendering' in path.name)
+    preferred = apps / 'isaaclab.python.headless.rendering.kit'
+    if preferred.is_file():
+        experience = preferred
+    elif len(candidates) == 1:
+        experience = candidates[0]
+    else:
+        raise RuntimeError(f'Cannot select a headless camera-rendering experience in {apps}; '
+                           f'found {[path.name for path in candidates]}')
+    return ['--experience', str(experience.resolve())]
+
+
 def install_terminal_recorder(env_cfg):
     from isaaclab.managers.recorder_manager import RecorderTerm, RecorderTermCfg, RecorderManagerBaseCfg
     from isaaclab.utils import configclass
@@ -79,8 +97,7 @@ def open_scene(args, output):
     native_args = ['--visualizer', 'kit' if args.stream else 'none', '--device', args.device,
                    '--num_envs', '1', '--enable_cameras', '--no_solve_relations',
                    '--external_environment_class_path', 'my_package.isaaclab_arena_environments.' + factory]
-    if args.stream:
-        native_args += ['--livestream', '1']
+    native_args += rendering_args(args.arena_root, args.stream)
     native_args += [name]
     if args.scene_config:
         native_args += ['--' + config_flag, str(args.scene_config.resolve())]
