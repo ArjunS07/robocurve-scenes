@@ -21,7 +21,7 @@ Isaac Lab 17.0.2 / Kit 110.3 on the L40S, via `environments/tools/probe_runtime.
 
 ## Code-checked (not physics)
 
-`python3 tests/run_pure_tests.py`: 86 tests, OK (1 skipped here because `pxr` is not installed; it passes with `usd-core`).
+`python3 tests/run_pure_tests.py`: 85 tests, OK (1 skipped here because `pxr` is not installed; it passes with `usd-core`).
 
 - **Fixture.** Authored like the YAM asset: `chassis` is the root rigid body with `PhysicsArticulationRootAPI`; `root_joint` (`PhysicsFixedJoint`) goes from the enclosing `remote` Xform (not a rigid body, so the world) to `chassis`. The spawner no longer requests `fix_root_link`. Plunger links are rigid bodies nested under `chassis` (YAM nests its links the same way). Composed under `/World/envs/env_0/remote`: one articulation root, on the chassis; every joint target resolves; three rigid bodies.
 - **Appearance** (likeness of ASIN B07T4N7NTX). MEASURED from the listing: 23.5 × 4.8 × 2.4 cm, black ABS, two AAA. ESTIMATED: everything about the bay (the front photo shows no compartment), the 46 mm bay-block width and 22 mm height, edge fillet 4 mm, end radius 12 mm.
