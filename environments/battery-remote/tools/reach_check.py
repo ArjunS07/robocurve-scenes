@@ -47,7 +47,11 @@ def _stage(report: dict, key: str, fn):
     try:
         report[key] = fn()
     except Exception as exc:  # one failed stage must not hide the others
-        report[key] = {"error": f"{type(exc).__name__}: {exc}", "trace": traceback.format_exc(limit=4)}
+        report[key] = {
+            "error": f"{type(exc).__name__}: {exc}",
+            # One line, so a grep for "error" also shows where it came from.
+            "error_at": " | ".join(line.strip() for line in traceback.format_exc(limit=6).splitlines() if line.strip().startswith(("File", "jac", "return", "dq", "body"))),
+        }
     return report[key]
 
 
@@ -157,9 +161,21 @@ def main() -> None:
         robot = robots[side]
         view = getattr(robot, "root_physx_view", None) or getattr(robot, "root_view", None)
         jac = _tensor(view.get_jacobians())
-        # Fixed-base articulations omit the root body from the Jacobian rows.
-        body = arm[side]["gripper"] - (1 if getattr(robot, "is_fixed_base", True) else 0)
-        return jac[0, body, :3, :][:, arm[side]["joints"]]
+        if not isinstance(jac, torch.Tensor):
+            # This build can hand back a Warp/proxy array; list indexing on it fails.
+            try:
+                import warp as wp
+
+                jac = wp.to_torch(jac)
+            except Exception:
+                jac = torch.as_tensor(jac, device=device)
+        fixed = bool(getattr(robot, "is_fixed_base", True))
+        # Fixed base: the root body has no Jacobian row. Floating base (the YAM arms report
+        # is_fixed_base False here even though root_joint anchors them): 6 root columns come first.
+        body = arm[side]["gripper"] - (1 if fixed else 0)
+        cols = arm[side]["joints"] if fixed else [j + 6 for j in arm[side]["joints"]]
+        jac_body = jac[0, body, :3, :]
+        return jac_body[:, torch.tensor(cols, device=jac_body.device)]
 
     def tip_mid(side):
         pos = _tensor(robots[side].data.body_pos_w)[0]
