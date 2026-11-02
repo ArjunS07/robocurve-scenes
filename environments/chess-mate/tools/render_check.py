@@ -244,9 +244,20 @@ def main() -> None:
         for name in robots:
             root = stage.GetPrimAtPath(f"/World/{name}")
             base = next((p for p in Usd.PrimRange(root, Usd.TraverseInstanceProxies()) if p.GetName() == "base"), None)
-            colliders = [str(p.GetPath()) for p in Usd.PrimRange(root, Usd.TraverseInstanceProxies()) if p.HasAPI(UsdPhysics.CollisionAPI)]
+            collider_prims = [p for p in Usd.PrimRange(root, Usd.TraverseInstanceProxies()) if p.HasAPI(UsdPhysics.CollisionAPI)]
+            colliders = [str(p.GetPath()) for p in collider_prims]
+            # Whether the asset's own colliders are switched on, and how they are approximated.
+            enabled = [p for p in collider_prims if UsdPhysics.CollisionAPI(p).GetCollisionEnabledAttr().Get() is not False]
+            approximations = sorted(
+                {str(UsdPhysics.MeshCollisionAPI(p).GetApproximationAttr().Get()) for p in collider_prims if p.HasAPI(UsdPhysics.MeshCollisionAPI)}
+            )
             whole = cache.ComputeWorldBound(root).ComputeAlignedRange()
-            entry = {"collider_count": len(colliders), "colliders_sample": colliders[:6]}
+            entry = {
+                "collider_count": len(colliders),
+                "colliders_enabled": len(enabled),
+                "collider_approximations": approximations,
+                "colliders_sample": colliders[:6],
+            }
             entry["arm_bbox_at_home"] = {"min": list(whole.GetMin()), "max": list(whole.GetMax())}
             entry["arm_past_table_near_edge_mm"] = round(1000 * max(0.0, table_min_x - whole.GetMin()[0]), 1)
             if base is not None:

@@ -52,11 +52,16 @@ def add_link_colliders(root_prim) -> dict:
         for prim in instances:
             prim.SetInstanceable(False)
             deinstanced += 1
-    added, skipped = 0, 0
+    added, skipped, already = 0, 0, 0
     types: Counter = Counter()
     for prim in Usd.PrimRange(root_prim, everything):
         types[prim.GetTypeName() or "<untyped>"] += 1
-        if not prim.IsA(UsdGeom.Gprim) or prim.HasAPI(UsdPhysics.CollisionAPI) or not prim.IsActive():
+        if not prim.IsA(UsdGeom.Gprim):
+            continue
+        if prim.HasAPI(UsdPhysics.CollisionAPI):
+            already += 1
+            continue
+        if not prim.IsActive():
             continue
         if prim.IsInstanceProxy():
             skipped += 1
@@ -68,6 +73,7 @@ def add_link_colliders(root_prim) -> dict:
     # Prim types under the robot, so a zero count can be diagnosed from the log alone.
     return {
         "added": added,
+        "already_colliders": already,
         "instance_proxies_skipped": skipped,
         "deinstanced": deinstanced,
         "prim_types": dict(types.most_common(10)),
@@ -85,7 +91,7 @@ def _spawn_yam_with_colliders(prim_path: str, cfg, *args, **kwargs):
     matches = sim_utils.find_matching_prims(prim_path, stage=stage) if hasattr(sim_utils, "find_matching_prims") else [prim]
     for match in matches:
         counts = add_link_colliders(match)
-        print(f"[yam] {match.GetPath()}: added {counts['added']} link colliders, de-instanced {counts['deinstanced']}, skipped {counts['instance_proxies_skipped']} instance proxies; prim types {counts['prim_types']}")
+        print(f"[yam] {match.GetPath()}: added {counts['added']} link colliders, {counts['already_colliders']} already colliders, de-instanced {counts['deinstanced']}, skipped {counts['instance_proxies_skipped']} instance proxies; prim types {counts['prim_types']}")
     return prim
 
 
