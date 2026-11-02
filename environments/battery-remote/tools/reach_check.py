@@ -408,6 +408,32 @@ def main() -> None:
             home(side)
         return rows
 
+    def grasp_geometry(side, cell_name):
+        """World bounding boxes of both finger bodies and the cell just before closing.
+
+        Says whether the cell actually lies between the finger pads: the IK steers the midpoint
+        of the finger bodies' origins, which need not be where the pads are.
+        """
+        from pxr import Usd, UsdGeom
+
+        stage = sim.stage if hasattr(sim, "stage") else sim_utils.get_current_stage()
+        cache = UsdGeom.BBoxCache(Usd.TimeCode.Default(), ["default", "render", "guide"])
+        robot_root = stage.GetPrimAtPath("/World/RobotLeft" if side == "left" else "/World/RobotRight")
+
+        def box(prim):
+            rng = cache.ComputeWorldBound(prim).ComputeAlignedRange()
+            return {"min_mm": [round(1000 * v, 1) for v in rng.GetMin()], "max_mm": [round(1000 * v, 1) for v in rng.GetMax()]}
+
+        out = {}
+        for tip in ("tip_left", "tip_right"):
+            prim = next((p for p in Usd.PrimRange(robot_root, Usd.TraverseInstanceProxies()) if p.GetName() == tip), None)
+            out[tip] = box(prim) if prim is not None else "not found"
+        out["cell"] = box(stage.GetPrimAtPath(f"/World/{cell_name}"))
+        pos = _tensor(robots[side].data.body_pos_w)[0]
+        out["tip_body_origins_mm"] = [[round(1000 * float(v), 1) for v in pos[i]] for i in arm[side]["tips"]]
+        out["table_top_mm"] = round(1000 * cfg.table.top_z_m, 1)
+        return out
+
     def grasp_cells():
         rows = {}
         for name, cell in cells.items():
@@ -417,6 +443,7 @@ def main() -> None:
             finger_cmd[side] = cfg.robot.finger_open_m
             above = reach(side, (x, y, z + args.approach_m), orient=True)
             at = reach(side, (x, y, z), orient=True)
+            boxes = _stage({}, "boxes", lambda: grasp_geometry(side, name))["boxes"]
             finger_cmd[side] = cfg.robot.finger_closed_m
             step(int(1.0 / dt))
             fingers = [round(float(_tensor(robots[side].data.joint_pos)[0, j]), 4) for j in arm[side]["fingers"]]
@@ -434,6 +461,7 @@ def main() -> None:
                 "cell_rise_mm": round(1000 * rise, 1),
                 "lifted": rise > 0.03,
                 "gripper_axes_at_grasp": at["gripper_axes_world"],
+                "before_close": boxes,
                 "approach_tilt_from_down_deg": at["approach_tilt_from_down_deg"],
                 "finger_axis_off_perpendicular_deg": at["finger_axis_off_perpendicular_deg"],
             }
