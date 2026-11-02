@@ -150,10 +150,11 @@ def main() -> None:
     stage = sim.stage if hasattr(sim, "stage") else sim_utils.get_current_stage()
 
     from isaaclab_arena.assets.background_library import MapleTableRobolab
+    from my_package.assets.table import maple_table_usd
 
     # Arena spawns the table at the origin with no pose (measured by tools/probe_runtime.py).
     for prim_path, spawn_cfg in (
-        ("/World/table", sim_utils.UsdFileCfg(usd_path=MapleTableRobolab.usd_path)),
+        ("/World/table", sim_utils.UsdFileCfg(usd_path=maple_table_usd(MapleTableRobolab.usd_path))),
         # Not Arena's own light assets; dimmer than the first run, which overexposed the board.
         ("/World/dome", sim_utils.DomeLightCfg(intensity=700.0)),
         ("/World/sun", sim_utils.DistantLightCfg(intensity=1200.0, angle=1.0)),

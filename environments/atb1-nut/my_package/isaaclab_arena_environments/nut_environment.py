@@ -16,6 +16,7 @@ class NutThreadingEnvironment(ExampleEnvironmentBase):
 
         from my_package.assets.geometry import ensure_generated_assets
         from my_package.assets.spawn import make_rigid_usd_object
+        from my_package.assets.table import maple_table
         from my_package.embodiments.yam_bimanual import YamBimanualEmbodiment
         from my_package.scoring.config import load_config
         from my_package.tasks.nut_task import NutThreadingTask
@@ -24,7 +25,7 @@ class NutThreadingEnvironment(ExampleEnvironmentBase):
         cfg = load_config(config_path)
         # Written to ROBOCURVE_GENERATED_DIR (set per run by the launcher), never the source tree.
         nut_usd, fixture_usd = ensure_generated_assets(cfg)
-        background = self.asset_registry.get_asset_by_name("maple_table_robolab")()
+        background = maple_table(self.asset_registry)
         light = self.asset_registry.get_asset_by_name("light")()
         directional_light = self.asset_registry.get_asset_by_name("directional_light")()
         nut = make_rigid_usd_object("nut", nut_usd, cfg.nut_pose.position_xyz, cfg.nut_pose.rotation_xyzw)

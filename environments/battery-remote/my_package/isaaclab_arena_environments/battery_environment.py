@@ -10,6 +10,7 @@ from isaaclab_arena.environments.isaaclab_arena_environment import IsaacLabArena
 from isaaclab_arena.scene.scene import Scene
 from isaaclab_arena_environments.example_environment_base import ExampleEnvironmentBase
 
+from my_package.assets.table import maple_table
 from my_package.assets.geometry import write_geometry
 from my_package.assets.spawn import make_battery, make_marks, make_remote
 from my_package.embodiments.yam_bimanual import YamBimanualEmbodiment
@@ -32,7 +33,7 @@ class BatteryInsertionEnvironment(ExampleEnvironmentBase):
         paths = write_geometry(cfg, generated)
         set_active_config(cfg)
 
-        background = self.asset_registry.get_asset_by_name("maple_table_robolab")()
+        background = maple_table(self.asset_registry)
         light = self.asset_registry.get_asset_by_name("light")()
         light.set_intensity(cfg.light_intensity)
         directional_light = self.asset_registry.get_asset_by_name("directional_light")()

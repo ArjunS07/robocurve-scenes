@@ -148,8 +148,9 @@ def main() -> None:
     stage = sim.stage if hasattr(sim, "stage") else sim_utils.get_current_stage()
     try:
         from isaaclab_arena.assets.background_library import MapleTableRobolab
+        from my_package.assets.table import maple_table_usd
 
-        table_cfg = sim_utils.UsdFileCfg(usd_path=MapleTableRobolab.usd_path)
+        table_cfg = sim_utils.UsdFileCfg(usd_path=maple_table_usd(MapleTableRobolab.usd_path))
         report["table"] = "maple_table_robolab"
     except Exception as exc:
         table_cfg = sim_utils.GroundPlaneCfg()

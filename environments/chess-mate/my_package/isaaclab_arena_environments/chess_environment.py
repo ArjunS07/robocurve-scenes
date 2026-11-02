@@ -10,6 +10,7 @@ from isaaclab_arena.environments.isaaclab_arena_environment import IsaacLabArena
 from isaaclab_arena.scene.scene import Scene
 from isaaclab_arena_environments.example_environment_base import ExampleEnvironmentBase
 
+from my_package.assets.table import maple_table
 from my_package.assets.geometry import write_geometry
 from my_package.assets.spawn import make_board, make_marks, make_piece
 from my_package.embodiments.yam_bimanual import YamBimanualEmbodiment
@@ -29,7 +30,7 @@ class ChessMateEnvironment(ExampleEnvironmentBase):
         set_active_config(cfg)
         puzzle = puzzles_for(cfg)[0]
 
-        background = self.asset_registry.get_asset_by_name("maple_table_robolab")()
+        background = maple_table(self.asset_registry)
         light = self.asset_registry.get_asset_by_name("light")()
         light.set_intensity(cfg.light_intensity)
         directional_light = self.asset_registry.get_asset_by_name("directional_light")()

@@ -144,10 +144,11 @@ def main() -> None:
     device = sim.device
 
     from isaaclab_arena.assets.background_library import MapleTableRobolab
+    from my_package.assets.table import maple_table_usd
 
     # Arena spawns the table at the origin with no pose (measured by tools/probe_runtime.py).
     for prim_path, spawn_cfg in (
-        ("/World/table", sim_utils.UsdFileCfg(usd_path=MapleTableRobolab.usd_path)),
+        ("/World/table", sim_utils.UsdFileCfg(usd_path=maple_table_usd(MapleTableRobolab.usd_path))),
         ("/World/dome", sim_utils.DomeLightCfg(intensity=cfg.light_intensity)),
         ("/World/sun", sim_utils.DistantLightCfg(intensity=2500.0, angle=1.0)),
     ):
