@@ -89,6 +89,12 @@ def main() -> None:
     parser.add_argument("--out", type=Path, default=None)
     parser.add_argument("--experience", default=None, help="Kit experience file; default: Isaac Lab's headless rendering one.")
     parser.add_argument("--no-render", action="store_true", help="Physics trials only, no camera.")
+    parser.add_argument(
+        "--use-fabric",
+        action="store_true",
+        help="Simulate with Fabric on, as the Arena env does. Off by default: with Fabric on, the 9bd03ef "
+        "battery renders showed moved bodies at their old poses (empty slots after a verified insertion).",
+    )
     args = parser.parse_args()
 
     sys.path.insert(0, str(args.arena_root))
@@ -119,10 +125,10 @@ def main() -> None:
     app = AppLauncher(app_parser.parse_args(app_argv)).app
 
     revision = _revision()
-    out = args.out or ROOT / "outputs" / "physics_check" / revision
+    out = args.out or ROOT / "outputs" / "physics_check" / (revision + ("-fabric" if args.use_fabric else ""))
     out.mkdir(parents=True, exist_ok=True)
     os.environ.setdefault("ROBOCURVE_GENERATED_DIR", str(out / "assets"))
-    report: dict = {"revision": revision, "out": str(out), "app_argv": app_argv, "rendered": render}
+    report: dict = {"revision": revision, "out": str(out), "use_fabric": args.use_fabric, "app_argv": app_argv, "rendered": render}
 
     import isaaclab.sim as sim_utils
     from isaaclab.assets import RigidObject, RigidObjectCfg
@@ -150,7 +156,7 @@ def main() -> None:
     }
 
     dt = 1.0 / 120.0
-    sim = sim_utils.SimulationContext(sim_utils.SimulationCfg(dt=dt, device="cuda:0"))
+    sim = sim_utils.SimulationContext(sim_utils.SimulationCfg(dt=dt, device="cuda:0", use_fabric=args.use_fabric))
     stage = sim.stage if hasattr(sim, "stage") else sim_utils.get_current_stage()
     try:
         from isaaclab_arena.assets.background_library import MapleTableRobolab
