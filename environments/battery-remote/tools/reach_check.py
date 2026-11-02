@@ -188,6 +188,47 @@ def main() -> None:
         body_shift, col_shift = layout[side]
         return jacobian_variant(side, body_shift, col_shift)
 
+    def angular_jacobian(side):
+        """Angular rows of the analytic Jacobian. They are the same for every point on the gripper,
+        so the fingertip lever that spoiled the linear rows does not affect them."""
+        body_shift, col_shift = layout[side]
+        jac = raw_jacobian(side)
+        body = arm[side]["gripper"] - body_shift
+        cols = torch.tensor([j + col_shift for j in arm[side]["joints"]], device=jac.device)
+        return jac[0, body, 3:6, :][:, cols]
+
+    def gripper_rotation(side):
+        x, y, z, w = _tensor(robots[side].data.body_quat_w)[0, arm[side]["gripper"]].tolist()  # xyzw
+        return torch.tensor(
+            [
+                [1 - 2 * (y * y + z * z), 2 * (x * y - z * w), 2 * (x * z + y * w)],
+                [2 * (x * y + z * w), 1 - 2 * (x * x + z * z), 2 * (y * z - x * w)],
+                [2 * (x * z - y * w), 2 * (y * z + x * w), 1 - 2 * (x * x + y * y)],
+            ],
+            device=device,
+        )
+
+    approach_local = {}
+
+    def measure_approach_axis(side):
+        """Gripper-frame direction from the gripper origin to the fingertip midpoint, at home."""
+        pos = _tensor(robots[side].data.body_pos_w)[0, arm[side]["gripper"]]
+        v = gripper_rotation(side).T @ (tip_mid(side) - pos)
+        approach_local[side] = v / torch.linalg.norm(v)
+        return [round(float(c), 3) for c in approach_local[side]]
+
+    def orientation_error(side):
+        """Rotation vector that points the approach axis down and the finger axis along world Y."""
+        rot = gripper_rotation(side)
+        approach = rot @ approach_local[side]
+        finger = rot[:, 1]  # the YAM finger joints slide along the gripper's local Y (probe)
+        down = torch.tensor([0.0, 0.0, -1.0], device=device)
+        across = torch.tensor([0.0, 1.0 if float(finger[1]) >= 0 else -1.0, 0.0], device=device)
+        err = torch.linalg.cross(approach, down) + torch.linalg.cross(finger, across)
+        tilt = math.degrees(math.acos(max(-1.0, min(1.0, float(approach @ down)))))
+        twist = math.degrees(math.acos(max(-1.0, min(1.0, abs(float(finger @ across))))))
+        return err, tilt, twist
+
     def calibrate(side, delta=0.05):
         """Measure d(tip)/d(joint) by nudging each arm joint, then pick the matching layout."""
         base_targets = targets[side].clone()
@@ -245,7 +286,7 @@ def main() -> None:
                 hits.append(name)
         return hits
 
-    def reach(side, goal, seconds=None):
+    def reach(side, goal, seconds=None, orient=False):
         """Closed-loop DLS IK on the fingertip midpoint with a measured, Broyden-updated Jacobian.
 
         The analytic Jacobian is for the gripper body, not the fingertips, and even the best
@@ -264,10 +305,19 @@ def main() -> None:
         p_prev = tip_mid(side).clone()
         for _ in range(steps):
             error = goal_t - tip_mid(side)
-            if float(torch.linalg.norm(error)) < args.tolerance_m * 0.5:
+            if float(torch.linalg.norm(error)) < args.tolerance_m * 0.5 and (
+                not orient or max(orientation_error(side)[1:]) < 5.0
+            ):
                 break
-            jjt = jac @ jac.T + (damping**2) * torch.eye(3, device=device)
-            dq = torch.clamp(jac.T @ torch.linalg.solve(jjt, error), -0.02, 0.02)
+            if orient:
+                rot_err, _, _ = orientation_error(side)
+                full_jac = torch.cat([jac, 0.05 * angular_jacobian(side)], dim=0)  # 5 cm per rad
+                full_err = torch.cat([error, 0.05 * rot_err])
+                jjt = full_jac @ full_jac.T + (damping**2) * torch.eye(6, device=device)
+                dq = torch.clamp(full_jac.T @ torch.linalg.solve(jjt, full_err), -0.02, 0.02)
+            else:
+                jjt = jac @ jac.T + (damping**2) * torch.eye(3, device=device)
+                dq = torch.clamp(jac.T @ torch.linalg.solve(jjt, error), -0.02, 0.02)
             q_now = _tensor(robot.data.joint_pos)[0, joints]
             for k, j in enumerate(joints):
                 # Keep the target within 0.15 rad of the actual joint so it cannot wind up far ahead.
@@ -293,6 +343,8 @@ def main() -> None:
                 round(float(targets[side][0, j] - _tensor(robot.data.joint_pos)[0, j]), 3) for j in joints
             ],
             "gripper_axes_world": gripper_axes(side),
+            "approach_tilt_from_down_deg": round(orientation_error(side)[1], 1) if side in approach_local else None,
+            "finger_axis_off_world_y_deg": round(orientation_error(side)[2], 1) if side in approach_local else None,
             "joint_pos_rad": [round(float(_tensor(robot.data.joint_pos)[0, j]), 3) for j in joints],
         }
 
@@ -310,6 +362,7 @@ def main() -> None:
         # Fixed-base convention as the fallback if calibration itself fails.
         layout[side] = (1, 0)
         _stage(report["jacobian_calibration"], side, lambda side=side: calibrate(side))
+    report["approach_axis_in_gripper_frame"] = {side: measure_approach_axis(side) for side in robots}
     report["arms"] = {
         side: {
             "is_fixed_base": bool(getattr(robots[side], "is_fixed_base", None)),
@@ -354,13 +407,13 @@ def main() -> None:
             x, y, z = pose.position_xyz
             side = nearer_arm((x, y))
             finger_cmd[side] = cfg.robot.finger_open_m
-            above = reach(side, (x, y, z + args.approach_m))
-            at = reach(side, (x, y, z))
+            above = reach(side, (x, y, z + args.approach_m), orient=True)
+            at = reach(side, (x, y, z), orient=True)
             finger_cmd[side] = cfg.robot.finger_closed_m
             step(int(1.0 / dt))
             fingers = [round(float(_tensor(robots[side].data.joint_pos)[0, j]), 4) for j in arm[side]["fingers"]]
             start_z = float(_tensor(cell.data.root_pos_w)[0, 2])
-            lift = reach(side, (x, y, z + 0.05))
+            lift = reach(side, (x, y, z + 0.05), orient=True)
             end = _tensor(cell.data.root_pos_w)[0].cpu().tolist()
             rise = end[2] - start_z
             rows[name] = {
@@ -373,6 +426,8 @@ def main() -> None:
                 "cell_rise_mm": round(1000 * rise, 1),
                 "lifted": rise > 0.03,
                 "gripper_axes_at_grasp": at["gripper_axes_world"],
+                "approach_tilt_from_down_deg": at["approach_tilt_from_down_deg"],
+                "finger_axis_off_world_y_deg": at["finger_axis_off_world_y_deg"],
             }
             finger_cmd[side] = cfg.robot.finger_open_m
             step(int(0.5 / dt))
