@@ -9,7 +9,7 @@ Local tests use the exact reported server SDK versions, built from Inspect Robot
 - `inspect-robots 0.0.1.dev1+gc8a821ba7`
 - `inspect-robots-agent 0.29.0`
 
-21 tests pass with fake simulator data, including the real agent with a mocked OpenRouter response and the real Inspect eval/logging loop. No paid calls occur in these tests.
+24 tests pass with fake simulator data, including the real agent with a mocked OpenRouter response and the real Inspect eval/logging loop. No paid calls occur in these tests.
 
 **The Arena bootstrap, live camera rendering, and terminal recorder hook still require a server GPU run.** A broken scene still needs to be fixed in that scene. This integration does not make a successful manipulation policy or an IK planner.
 
@@ -60,6 +60,26 @@ All three RGB images are sent on each policy decision. The agent has a three-cal
 
 Inspect logs, frame sidecars and agent transcripts go into the run's `inspect/` directory. The default upstream policy retains its provider-specific tool metadata between calls.
 
+## Default MP4 recording for agent runs
+
+Agent mode checks FFmpeg and the H.264 encoder before prompting for a key or starting the simulator. It uses FFmpeg from PATH, an already-installed `imageio_ffmpeg` binary, or `--ffmpeg /absolute/path/to/ffmpeg`. If none works, the run stops before making model calls.
+
+After a normal end, policy give-up, handled error, or a single Ctrl+C, the launcher exports saved sensor frames before shutting down Kit:
+
+- `<run directory>/rollout.mp4`: overhead, front, side, side by side.
+- `<run directory>/videos/overhead.mp4`, `front.mp4`, and `side.mp4`: individual camera views.
+- `<run directory>/videos/recording.json`: export status, frame steps, playback rate, and any incomplete camera sets excluded from export.
+
+Playback uses the actual control rate and simulation time. Model-thinking pauses and the desktop streaming viewport are not part of these videos. Raw camera frames, actions, and eval logs remain available. Allow the export to finish after Ctrl+C. A hard kill, second interrupt, or stopped machine can prevent export; saved frames can be recovered separately:
+
+```bash
+/home/ubuntu/workspace/IsaacLab-Arena/.venv/bin/python \
+  integrations/inspect-arena/robocurve_inspect/video.py \
+  --run-dir "/absolute/path/to/the/run" --fps 15
+```
+
+Use the run's `control_hz` from `run.json` for `--fps` when it differs from 15. The real media tests encode and decode a combined MP4 and check all three camera colors/order, partial-run recovery without a final JSON log, and missing-view failure without deleting frames.
+
 ## Extended run: 120 simulation seconds, 200 model calls
 
 ```bash
@@ -71,7 +91,7 @@ Inspect logs, frame sidecars and agent transcripts go into the run's `inspect/` 
 
 This changes only the current environment's timeout before Lab creates it. It leaves the checked-in 90-second task definition unchanged. At 15 Hz the effective step limit is 1800. Success, failure, or policy give-up can end a trial earlier. The 200 calls are an upper bound, not a target to exhaust. There is no wall-clock timeout.
 
-The saved `run.json` records the configured and effective episode durations, whether task timing was modified, the effective step budget, control rate, and model-call cap. Camera frames, actions, and Inspect logs are saved as usual. A 120-second chess run uses modified task timing; it is not the original 90-second task setting.
+The saved `run.json` records the configured and effective episode durations, whether task timing was modified, the effective step budget, control rate, and model-call cap. Camera frames, actions, Inspect logs, and the default MP4s are saved as usual. A 120-second chess run uses modified task timing; it is not the original 90-second task setting.
 
 ## Action and observation contract
 

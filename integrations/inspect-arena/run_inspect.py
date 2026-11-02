@@ -35,6 +35,7 @@ def main():
     parser.add_argument('--stream', action='store_true')
     parser.add_argument('--public-ip', default=os.environ.get('PUBLIC_IP'))
     parser.add_argument('--output', type=Path)
+    parser.add_argument('--ffmpeg', help='Optional FFmpeg executable for default agent MP4 recording')
     parser.add_argument('--model', default='google/gemini-4-argon')
     parser.add_argument('--max-llm-calls', type=int, default=3)
     args = parser.parse_args()
@@ -50,6 +51,15 @@ def main():
             from inspect_robots_agent.policy import LLMAgentPolicy
     except ImportError as exc:
         parser.error(f'Use the existing Arena interpreter with Inspect installed: {exc}')
+    # Camera recording is mandatory for agent runs: reject an unusable encoder
+    # before prompting for a key, creating Kit, or making any model request.
+    from robocurve_inspect.video import require_ffmpeg, export_recording
+    encoder = None
+    if args.mode == 'agent':
+        try:
+            encoder = require_ffmpeg(args.ffmpeg)
+        except RuntimeError as exc:
+            parser.error(str(exc))
     if args.mode == 'agent' and not os.environ.get('OPENROUTER_API_KEY'):
         if not sys.stdin.isatty():
             parser.error('Set OPENROUTER_API_KEY in the process environment or run in an interactive terminal')
@@ -76,6 +86,8 @@ def main():
                   'requested_episode_seconds': args.episode_seconds,
                   'requested_max_environment_steps': args.steps,
                   'max_llm_calls': args.max_llm_calls if args.mode == 'agent' else None,
+                  'video': {'enabled': args.mode == 'agent', 'encoder': encoder,
+                            'composite': 'rollout.mp4' if args.mode == 'agent' else None},
                   'versions': {}}
     repo = Path(__file__).resolve().parents[2]
     try:
@@ -105,9 +117,24 @@ def main():
         if args.mode == 'agent':
             task = Task(name=args.scene, scenes=[scene], scorer=[ArenaTaskScore(), success_at_end()],
                         max_steps=min(args.steps, max_episode))
-            logs = eval(task, policy, adapter, log_dir=str(output / 'inspect'), store_frames=True,
-                        fail_on_error=True, environment_revision=provenance['git_commit'])
-            print(f'Inspect completed; log directory: {output / "inspect"}')
+            rollout_failed = False
+            try:
+                logs = eval(task, policy, adapter, log_dir=str(output / 'inspect'), store_frames=True,
+                            fail_on_error=True, environment_revision=provenance['git_commit'])
+                print(f'Inspect completed; log directory: {output / "inspect"}')
+            except BaseException:
+                rollout_failed = True
+                raise
+            finally:
+                # Export before leaving the Kit context: its exception handler
+                # can terminate the process. Do not mask the rollout's error.
+                print('Exporting camera MP4s from saved frames...', flush=True)
+                try:
+                    export_recording(output, encoder, adapter.info.control_hz)
+                except Exception as exc:
+                    print(str(exc), file=sys.stderr, flush=True)
+                    if not rollout_failed:
+                        raise
         else:
             observation = adapter.reset(scene, seed=42)
             save_capture(output / 'initial', observation, adapter.info, adapter._report())
