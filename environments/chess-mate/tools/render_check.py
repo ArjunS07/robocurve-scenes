@@ -64,6 +64,18 @@ def _stage(report: dict, key: str, fn):
     return report[key]
 
 
+def _grep_arena(root: Path, needle: str, limit: int = 15) -> list[str]:
+    """Where the installed Arena handles a flag, so a camera failure can be fixed in one round."""
+    hits = []
+    for path in sorted((root / "isaaclab_arena").rglob("*.py")):
+        for number, line in enumerate(path.read_text(errors="ignore").splitlines(), 1):
+            if needle in line:
+                hits.append(f"{path.relative_to(root)}:{number}: {line.strip()[:160]}")
+                if len(hits) >= limit:
+                    return hits
+    return hits
+
+
 def _tensor(value):
     return value.torch if hasattr(value, "torch") else value
 
@@ -85,13 +97,18 @@ def main() -> None:
 
     app_parser = argparse.ArgumentParser()
     AppLauncher.add_app_launcher_args(app_parser)
-    app = AppLauncher(app_parser.parse_args(["--visualizer", "none", "--enable_cameras"])).app
+    # This Isaac Lab build has no --enable_cameras on AppLauncher (it is an Arena runner
+    # flag); pass it only where it exists.
+    known = {action.dest for action in app_parser._actions}
+    app_argv = ["--visualizer", "none"] + (["--enable_cameras"] if "enable_cameras" in known else [])
+    app = AppLauncher(app_parser.parse_args(app_argv)).app
+    camera_wiring = [] if "enable_cameras" in known else _grep_arena(args.arena_root, "enable_cameras")
 
     revision = _revision()
     out = args.out or ROOT / "outputs" / "render_check" / revision
     out.mkdir(parents=True, exist_ok=True)
     os.environ.setdefault("ROBOCURVE_GENERATED_DIR", str(out / "assets"))
-    report: dict = {"revision": revision, "out": str(out)}
+    report: dict = {"revision": revision, "out": str(out), "app_argv": app_argv, "arena_camera_wiring": camera_wiring}
 
     import isaaclab.sim as sim_utils
     import numpy as np
