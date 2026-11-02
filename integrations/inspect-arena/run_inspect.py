@@ -27,6 +27,8 @@ def main():
     parser.add_argument('--scene', choices=('chess-mate', 'battery-remote', 'atb1-nut'), required=True)
     parser.add_argument('--mode', choices=('capture', 'hold', 'agent'), default='capture')
     parser.add_argument('--steps', type=int, default=50)
+    parser.add_argument('--episode-seconds', type=float,
+                        help='Override simulation-time timeout for this run; recorded as modified task timing')
     parser.add_argument('--arena-root', type=Path, default=Path('/home/ubuntu/workspace/IsaacLab-Arena'))
     parser.add_argument('--scene-config', type=Path)
     parser.add_argument('--device', default='cuda:0')
@@ -38,6 +40,8 @@ def main():
     args = parser.parse_args()
     if args.steps <= 0 or args.max_llm_calls <= 0:
         parser.error('--steps and --max-llm-calls must be positive')
+    if args.episode_seconds is not None and (not math.isfinite(args.episode_seconds) or args.episode_seconds <= 0):
+        parser.error('--episode-seconds must be positive and finite')
     if args.stream and not args.public_ip:
         parser.error('--stream needs --public-ip or PUBLIC_IP')
     try:
@@ -69,6 +73,9 @@ def main():
                   'model': args.model if args.mode == 'agent' else None,
                   'endpoint': 'https://openrouter.ai/api/v1' if args.mode == 'agent' else None,
                   'task_clock': 'simulation time; model inference does not advance physics',
+                  'requested_episode_seconds': args.episode_seconds,
+                  'requested_max_environment_steps': args.steps,
+                  'max_llm_calls': args.max_llm_calls if args.mode == 'agent' else None,
                   'versions': {}}
     repo = Path(__file__).resolve().parents[2]
     try:
@@ -86,9 +93,16 @@ def main():
     (output / 'run.json').write_text(json.dumps(provenance, indent=2) + '\n')
     print(f'Outputs: {output}', flush=True)
     with open_scene(args, output) as (adapter, instruction):
+        provenance.update(adapter.base._robocurve_inspect_episode_budget)
+        provenance['control_hz'] = adapter.info.control_hz
+        max_episode = max(1, math.ceil(float(adapter.base.cfg.episode_length_s) * adapter.info.control_hz))
+        provenance['effective_max_environment_steps'] = min(args.steps, max_episode)
+        (output / 'run.json').write_text(json.dumps(provenance, indent=2) + '\n')
+        print(f"Episode budget: {provenance['effective_episode_seconds']:g} simulation seconds; "
+              f"up to {provenance['effective_max_environment_steps']} steps; "
+              f"model-call limit: {provenance['max_llm_calls']}", flush=True)
         scene = Scene(id=args.scene, instruction=instruction)
         if args.mode == 'agent':
-            max_episode = max(1, math.ceil(float(adapter.base.cfg.episode_length_s) * adapter.info.control_hz))
             task = Task(name=args.scene, scenes=[scene], scorer=[ArenaTaskScore(), success_at_end()],
                         max_steps=min(args.steps, max_episode))
             logs = eval(task, policy, adapter, log_dir=str(output / 'inspect'), store_frames=True,

@@ -9,7 +9,7 @@ Local tests use the exact reported server SDK versions, built from Inspect Robot
 - `inspect-robots 0.0.1.dev1+gc8a821ba7`
 - `inspect-robots-agent 0.29.0`
 
-18 tests pass with fake simulator data, including the real agent with a mocked OpenRouter response and the real Inspect eval/logging loop. No paid calls occur in these tests.
+21 tests pass with fake simulator data, including the real agent with a mocked OpenRouter response and the real Inspect eval/logging loop. No paid calls occur in these tests.
 
 **The Arena bootstrap, live camera rendering, and terminal recorder hook still require a server GPU run.** A broken scene still needs to be fixed in that scene. This integration does not make a successful manipulation policy or an IK planner.
 
@@ -59,6 +59,19 @@ This is actual model-driven simulated motion. It uses `google/gemini-4-argon`, e
 All three RGB images are sent on each policy decision. The agent has a three-call budget by default and one HTTP attempt per completion. This SDK does not support an output-token cap on its Chat wire, so no per-request token cap is claimed. The exact policy configuration is validated before Kit starts. The limit on environment steps can truncate a motion chunk. The result is a bring-up trial, not the full task benchmark.
 
 Inspect logs, frame sidecars and agent transcripts go into the run's `inspect/` directory. The default upstream policy retains its provider-specific tool metadata between calls.
+
+## Extended run: 120 simulation seconds, 200 model calls
+
+```bash
+/home/ubuntu/workspace/IsaacLab-Arena/.venv/bin/python \
+  integrations/inspect-arena/run_inspect.py --scene chess-mate --mode agent \
+  --episode-seconds 120 --steps 2000 --max-llm-calls 200 \
+  --stream --public-ip 160.211.46.91
+```
+
+This changes only the current environment's timeout before Lab creates it. It leaves the checked-in 90-second task definition unchanged. At 15 Hz the effective step limit is 1800. Success, failure, or policy give-up can end a trial earlier. The 200 calls are an upper bound, not a target to exhaust. There is no wall-clock timeout.
+
+The saved `run.json` records the configured and effective episode durations, whether task timing was modified, the effective step budget, control rate, and model-call cap. Camera frames, actions, and Inspect logs are saved as usual. A 120-second chess run uses modified task timing; it is not the original 90-second task setting.
 
 ## Action and observation contract
 

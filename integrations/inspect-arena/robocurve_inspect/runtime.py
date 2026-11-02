@@ -1,6 +1,7 @@
 """Arena launch boundary. All Isaac imports happen after torch and Kit startup."""
 from contextlib import contextmanager
 from importlib import import_module
+import math
 import os
 from pathlib import Path
 import sys
@@ -30,6 +31,21 @@ def rendering_args(arena_root, stream):
         raise RuntimeError(f'Cannot select a headless camera-rendering experience in {apps}; '
                            f'found {[path.name for path in candidates]}')
     return ['--experience', str(experience.resolve())]
+
+
+def configure_episode_limit(env_cfg, seconds):
+    """Override only this run's Lab timeout; leave the scene YAML untouched."""
+    configured = float(env_cfg.episode_length_s)
+    effective = configured if seconds is None else float(seconds)
+    if not math.isfinite(effective) or effective <= 0:
+        raise ValueError('Episode duration must be positive and finite')
+    if seconds is not None:
+        # Arena's time_out term uses Lab's max_episode_length derived from this
+        # setting. Its scene task config remains the original task definition.
+        env_cfg.episode_length_s = effective
+    return {'configured_episode_seconds': configured,
+            'effective_episode_seconds': effective,
+            'task_timing_modified': effective != configured}
 
 
 def install_terminal_recorder(env_cfg):
@@ -117,11 +133,13 @@ def open_scene(args, output):
                 geometry.GENERATED_DIR = output / 'generated'
             builder = get_arena_builder_from_cli(native)
             env_cfg, env_kwargs = builder.compose_manager_cfg()
+            episode_budget = configure_episode_limit(env_cfg, getattr(args, 'episode_seconds', None))
             install_terminal_recorder(env_cfg)
             env_cfg.recorders.dataset_export_dir_path = str(output / 'arena')
             try:
                 env = builder.make_registered(env_cfg=env_cfg, env_kwargs=env_kwargs)
                 base = env.unwrapped
+                base._robocurve_inspect_episode_budget = episode_budget
                 task = builder.arena_env.task
                 cfg = task.cfg
                 base._robocurve_inspect_task_cfg = cfg

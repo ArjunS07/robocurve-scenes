@@ -2,10 +2,11 @@
 from pathlib import Path
 import sys
 import tempfile
+from types import SimpleNamespace as NS
 import unittest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from robocurve_inspect.runtime import rendering_args
+from robocurve_inspect.runtime import configure_episode_limit, rendering_args
 
 
 class RenderingBootstrapTests(unittest.TestCase):
@@ -35,3 +36,26 @@ class RenderingBootstrapTests(unittest.TestCase):
     def test_stream_keeps_livestream_experience_selection(self):
         self.assertEqual(rendering_args(Path('/no-installation-required'), True),
                          ['--livestream', '1'])
+
+
+class EpisodeBudgetTests(unittest.TestCase):
+    def test_default_keeps_the_configured_timeout(self):
+        cfg = NS(episode_length_s=90.)
+        report = configure_episode_limit(cfg, None)
+        self.assertEqual(cfg.episode_length_s, 90.)
+        self.assertEqual(report['effective_episode_seconds'], 90.)
+        self.assertFalse(report['task_timing_modified'])
+
+    def test_120_second_run_changes_lab_timeout_and_records_original(self):
+        cfg = NS(episode_length_s=90.)
+        report = configure_episode_limit(cfg, 120.)
+        self.assertEqual(cfg.episode_length_s, 120.)
+        self.assertEqual(report, {'configured_episode_seconds': 90.,
+                                 'effective_episode_seconds': 120., 'task_timing_modified': True})
+
+    def test_invalid_timeout_is_rejected_without_changing_config(self):
+        for invalid in (0., -1., float('inf'), float('nan')):
+            cfg = NS(episode_length_s=90.)
+            with self.assertRaises(ValueError):
+                configure_episode_limit(cfg, invalid)
+            self.assertEqual(cfg.episode_length_s, 90.)
