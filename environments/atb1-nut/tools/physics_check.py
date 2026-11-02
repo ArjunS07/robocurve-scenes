@@ -85,6 +85,17 @@ def main() -> None:
     )
     parser.add_argument("--turn-rate", type=float, default=0.25, help="Target turns per second.")
     parser.add_argument(
+        "--hold-upright",
+        action="store_true",
+        help="Hold the nut's axis vertical each step (an ideal grip), as fingers would. The sweep tries both.",
+    )
+    parser.add_argument(
+        "--backoff-torque-scale",
+        type=float,
+        default=3.0,
+        help="Back-off torque cap as a multiple of the chosen cap: a seated nut needs breakaway torque.",
+    )
+    parser.add_argument(
         "--torque-sweep",
         default="0.002,0.005,0.01,0.02",
         help="Comma-separated torque caps (N m) tried in a sweep before the main stages; '' skips it.",
@@ -213,9 +224,9 @@ def main() -> None:
     # ---- wrench / drive -------------------------------------------------------------
     drive = {"mode": None}
 
-    def apply_wrench(force_z: float, torque_z: float):
+    def apply_wrench(force_z: float, torque_z: float, torque_xy=(0.0, 0.0)):
         forces = torch.tensor([[[0.0, 0.0, force_z]]], device=device)
-        torques = torch.tensor([[[0.0, 0.0, torque_z]]], device=device)
+        torques = torch.tensor([[[torque_xy[0], torque_xy[1], torque_z]]], device=device)
         if hasattr(nut, "set_external_force_and_torque"):
             try:
                 nut.set_external_force_and_torque(forces, torques, is_global=True)
@@ -251,6 +262,8 @@ def main() -> None:
             "pos": pos,
             "quat": quat,
             "wz": ang[2],
+            "w": ang,
+            "z_axis": rotate(quat, (0.0, 0.0, 1.0)),
             "gap_m": pos[2] - f.nut_height_m / 2.0 - fz,
             "radial_m": math.hypot(pos[0] - fx, pos[1] - fy),
             "tilt_deg": angle_deg(rotate(quat, (0.0, 0.0, 1.0)), (0.0, 0.0, 1.0)),
@@ -276,6 +289,25 @@ def main() -> None:
         scorer["snapshot"], scorer["report"] = score_step(cfg, observed, dt)
         return scorer["report"]
 
+    def hold_upright_now():
+        """Ideal grip: remove tilt and tilting spin, keep position, height and spin about the axis.
+
+        An explicit corrective torque cannot be stiff enough on a 5 g nut at dt = 1/120 s
+        without going unstable, so this projects the state instead.
+        """
+        pos = _tensor(nut.data.root_pos_w)[0]
+        quat = quaternion_xyzw(_tensor(nut.data.root_quat_w)[0])
+        x_axis = rotate(quat, (1.0, 0.0, 0.0))
+        yaw = math.atan2(x_axis[1], x_axis[0])
+        upright = sim_quaternion((0.0, 0.0, math.sin(yaw / 2.0), math.cos(yaw / 2.0)))
+        pose = torch.tensor([[float(pos[0]), float(pos[1]), float(pos[2]), *upright]], device=device)
+        vel = _tensor(nut.data.root_vel_w)[0].clone() if hasattr(nut.data, "root_vel_w") else None
+        nut.write_root_pose_to_sim(pose)
+        if vel is not None:
+            vel[3] = 0.0
+            vel[4] = 0.0
+            nut.write_root_velocity_to_sim(vel.unsqueeze(0))
+
     def advance(seconds: float, *, force_z=0.0, torque_fn=None, released=True, until=None, render_frames=False, sample_every=6):
         samples = []
         for index in range(max(1, int(seconds / dt))):
@@ -286,6 +318,8 @@ def main() -> None:
             sim.step(render=render_frames)
             nut.update(dt)
             fixture.update(dt)
+            if args.hold_upright and not released:
+                hold_upright_now()
             state = read()
             result = score(state, released)
             if index % sample_every == 0:
@@ -395,8 +429,9 @@ def main() -> None:
         """Re-engage and advance at each cap. 0afbd1a..ce61035 showed a narrow window:
         2 mN m tracked the helix but stalled; 50 mN m spun the nut through the ridge."""
         rows = {}
-        for cap in [float(v) for v in args.torque_sweep.split(",") if v.strip()]:
-            args.max_torque = cap
+        trials = [(cap, upright) for upright in (False, True) for cap in [float(v) for v in args.torque_sweep.split(",") if v.strip()]]
+        for cap, upright in trials:
+            args.max_torque, args.hold_upright = cap, upright
             engage()
             before = read()
             goal = before["clockwise_turns"] + args.turns
@@ -406,8 +441,9 @@ def main() -> None:
             descent = before["gap_m"] - state["gap_m"]
             ideal = [before["gap_m"] - f.pitch_m * (smp["cw_turns"] - round(before["clockwise_turns"], 4)) for smp in samples]
             deviation = max((abs(smp["gap_mm"] / 1000 - g) for smp, g in zip(samples, ideal)), default=0.0)
-            rows[f"{cap * 1000:g}_mNm"] = {
+            rows[f"{cap * 1000:g}_mNm{'_held' if upright else '_free'}"] = {
                 "cap_n_m": cap,
+                "held_upright": upright,
                 "reached_goal": state["clockwise_turns"] >= goal,
                 "turns": round(turns, 3),
                 "descent_per_turn_mm": round(descent / turns * 1000, 3) if turns > 0.05 else None,
@@ -417,10 +453,21 @@ def main() -> None:
         # Best cap: reached the goal while staying on the helix; else the least deviation.
         tracking = [r for r in rows.values() if r["reached_goal"] and r["max_helix_deviation_mm"] < 0.5 * f.pitch_m * 1000]
         pool = tracking or list(rows.values())
-        best = min(pool, key=lambda r: (not r["reached_goal"], r["max_helix_deviation_mm"])) if pool else None
+        # Prefer the highest tracking cap: a robot turns with more than a fingertip's torque.
+        best = (
+            max(tracking, key=lambda r: r["cap_n_m"])
+            if tracking
+            else (min(pool, key=lambda r: (not r["reached_goal"], r["max_helix_deviation_mm"])) if pool else None)
+        )
         if best is not None:
-            args.max_torque = best["cap_n_m"]
-        return {"trials": rows, "chosen_cap_n_m": args.max_torque, "a_cap_tracks_the_thread": bool(tracking)}
+            args.max_torque, args.hold_upright = best["cap_n_m"], best["held_upright"]
+        return {
+            "trials": rows,
+            "chosen_cap_n_m": args.max_torque,
+            "chosen_held_upright": args.hold_upright,
+            "a_cap_tracks_the_thread": bool(tracking),
+            "held_caps_that_track": sorted(r["cap_n_m"] for r in tracking if r["held_upright"]),
+        }
 
     if args.torque_sweep.strip():
         _stage(report, "torque_sweep", torque_sweep)
@@ -510,15 +557,22 @@ def main() -> None:
 
         def back_off():
             free_gap = travel + f.pitch_m
+            before = read()
+            base_cap, base_upright = args.max_torque, args.hold_upright
+            args.max_torque, args.hold_upright = base_cap * args.backoff_torque_scale, True
             state, samples = advance(
                 4.0 * (f.turns + 2) / args.turn_rate,
                 torque_fn=spin(-args.turn_rate),
                 released=False,
                 until=lambda s: s["gap_m"] >= free_gap,
             )
+            args.max_torque, args.hold_upright = base_cap, base_upright
             weight = f.nut_mass_kg * 9.81
             lifted, _ = advance(0.6, force_z=2.0 * weight, released=False)
             return {
+                "backoff_cap_n_m": base_cap * args.backoff_torque_scale,
+                "reverse_turns": round(before["clockwise_turns"] - state["clockwise_turns"], 3),
+                "rise_mm": round((state["gap_m"] - before["gap_m"]) * 1000, 3),
                 "unthreaded": summary(state),
                 "lifted": summary(lifted),
                 "freed": lifted["gap_m"] > ridge_start_top_z_m(cfg) + 0.002,
