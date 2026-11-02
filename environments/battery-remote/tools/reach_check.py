@@ -227,7 +227,11 @@ def main() -> None:
         """
         rot = gripper_rotation(side)
         approach = rot @ approach_local[side]
-        finger = rot[:, 1]
+        # The fingers do not move along the gripper's local Y (c54b4eb: local Y was within 2 deg of
+        # world Y while the pads were 68 mm apart along X and Z). Use the measured pad-to-pad axis.
+        left_pad, right_pad = pad_centres(side)
+        finger = right_pad - left_pad
+        finger = finger / max(float(torch.linalg.norm(finger)), 1e-6)
         down = torch.tensor([0.0, 0.0, -1.0], device=device)
         # Fingers must close horizontally across the cell: along world +-Y. Only being
         # perpendicular to X let them close vertically, one above the cell and one under it.
@@ -409,6 +413,22 @@ def main() -> None:
 
     step(int(1.0 / dt))
     report["finger_pad_centres_local_mm"] = {side: _stage({}, side, lambda side=side: measure_pads(side)) for side in robots}
+
+    def pad_gaps(side):
+        """Pad-centre separation fully open and fully closed on nothing, as a reference for grasps."""
+        finger_cmd[side] = cfg.robot.finger_open_m
+        step(int(0.5 / dt))
+        a, b = pad_centres(side)
+        opened = float(torch.linalg.norm(a - b))
+        finger_cmd[side] = cfg.robot.finger_closed_m
+        step(int(1.0 / dt))
+        a, b = pad_centres(side)
+        closed = float(torch.linalg.norm(a - b))
+        finger_cmd[side] = cfg.robot.finger_open_m
+        step(int(0.5 / dt))
+        return {"open_mm": round(1000 * opened, 1), "closed_empty_mm": round(1000 * closed, 1)}
+
+    report["pad_gap_reference"] = {side: _stage({}, side, lambda side=side: pad_gaps(side)) for side in robots}
     report["jacobian_calibration"] = {}
     for side in robots:
         # Fixed-base convention as the fallback if calibration itself fails.
