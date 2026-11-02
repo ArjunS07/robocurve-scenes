@@ -73,6 +73,9 @@ Result on the Mac: `Ran 28 tests` — `OK`. The tests drive `step`, the puzzle b
 - revision 159ae2b, `tools/render_check.py`: the new board and pieces render; the grazing view shows no z-fighting; all six piece types are distinct; after a 3 s settle the worst piece drift is 0.6 mm, base-to-board penetration 0.023 mm, tilt 0.016°, board drift 0.11 mm; 321 colliders (10 per piece + board) render in the overlay as stacked prisms that follow the base, stem, and head; both YAM bases stand on the tabletop with the arms facing +X toward the board
 - the same run found the converted YAM USDA has **no colliders** (fixed in 0dc14dc by adding convex-hull link colliders at spawn, not yet re-run) and showed over-glossy materials and over-bright render lighting (retuned afterwards, not yet re-rendered)
 
+- revision feddfae: the Arena launcher completes 50 zero-action steps on the new board and pieces with no false failure (`num_episodes: 0`); the maple table now loads from the production S3 bucket because the staging copy returns 404
+- still open: YAM link colliders. The spawn hook de-instanced 18 prims per arm but found 0 shapes to collide; the next run prints the prim types under each arm
+
 ## Not yet verified (needs the server)
 
 - the reworked visuals: textured board, Poly Haven pieces, materials (run `tools/render_check.py`)
