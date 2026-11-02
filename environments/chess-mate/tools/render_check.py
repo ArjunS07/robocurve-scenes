@@ -154,8 +154,9 @@ def main() -> None:
     # Arena spawns the table at the origin with no pose (measured by tools/probe_runtime.py).
     for prim_path, spawn_cfg in (
         ("/World/table", sim_utils.UsdFileCfg(usd_path=MapleTableRobolab.usd_path)),
-        ("/World/dome", sim_utils.DomeLightCfg(intensity=cfg.light_intensity)),
-        ("/World/sun", sim_utils.DistantLightCfg(intensity=2500.0, angle=1.0)),
+        # Not Arena's own light assets; dimmer than the first run, which overexposed the board.
+        ("/World/dome", sim_utils.DomeLightCfg(intensity=700.0)),
+        ("/World/sun", sim_utils.DistantLightCfg(intensity=1200.0, angle=1.0)),
     ):
         spawn_cfg.func(prim_path, spawn_cfg)
 

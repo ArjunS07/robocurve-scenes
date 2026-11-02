@@ -23,10 +23,12 @@ piece_mesh:
   scale_xy: 0.52
   scale_z: 0.64
   # Cream lacquered wood and glossy black, linear RGB. Estimated from the photo.
-  white_rgb: [0.80, 0.66, 0.44]
-  white_roughness: 0.45
-  black_rgb: [0.012, 0.012, 0.012]
-  black_roughness: 0.12
+  # Tuned after the first server render (159ae2b): the earlier clearcoat made black pieces
+  # mirror the wood table, and the cream read as white.
+  white_rgb: [0.72, 0.55, 0.32]
+  white_roughness: 0.5
+  black_rgb: [0.006, 0.006, 0.006]
+  black_roughness: 0.3
 
 board:
   # Outer size 0.2667 m (10.5 in) is from the listing: 8 * square + 2 * border.

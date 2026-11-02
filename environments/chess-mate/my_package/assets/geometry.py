@@ -368,7 +368,7 @@ def _board_usda(cfg: ChessMateConfig) -> str:
     textures = ASSET_DIR / "textures"
     looks_body = "\n".join(
         [
-            _preview_material(looks, "top", texture=textures / "board_top.png", roughness=0.42, clearcoat=0.3),
+            _preview_material(looks, "top", texture=textures / "board_top.png", roughness=0.65),
             _preview_material(looks, "edge", texture=textures / "board_edge.png", roughness=0.5),
         ]
     )
@@ -427,7 +427,7 @@ def _piece_usda(cfg: ChessMateConfig, role: str, color: str) -> str:
     roughness = mesh.white_roughness if color == "white" else mesh.black_roughness
     prisms = "\n".join(_prism(f"band_{index:02d}", prism, sxy, sz) for index, prism in enumerate(collision_prisms()[role]))
     source = (ASSET_DIR / "pieces" / f"{role}.usda").as_posix()
-    material = _preview_material("/piece/Looks", "finish", color=rgb, roughness=roughness, clearcoat=1.0 if color == "black" else 0.3)
+    material = _preview_material("/piece/Looks", "finish", color=rgb, roughness=roughness, clearcoat=0.35 if color == "black" else 0.1)
     return f"""#usda 1.0
 (
     defaultPrim = "piece"
