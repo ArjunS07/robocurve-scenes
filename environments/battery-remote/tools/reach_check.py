@@ -237,6 +237,63 @@ def main() -> None:
         twist = math.degrees(math.asin(max(-1.0, min(1.0, abs(float(finger[0]))))))
         return err, tilt, twist
 
+    def calibrate(side, delta=0.05):
+        """Measure d(tip)/d(joint) by nudging each arm joint, then pick the matching layout."""
+        base_targets = targets[side].clone()
+        step(int(0.5 / dt))
+        p0 = tip_mid(side).clone()
+        variants = {(b, c): jacobian_variant(side, b, c) for b in (0, 1) for c in (0, 6)}
+        measured = []
+        for j in arm[side]["joints"]:
+            targets[side][0, j] = base_targets[0, j] + delta
+            step(int(0.6 / dt))
+            measured.append(((tip_mid(side) - p0) / delta).clone())
+            targets[side] = base_targets.clone()
+            step(int(0.6 / dt))
+        measured = torch.stack(measured, dim=1)  # 3 x 6
+        measured_jac[side] = measured.clone()
+        scores = {}
+        for key, jac in variants.items():
+            if jac is None:
+                scores[f"body-{key[0]}_cols+{key[1]}"] = None
+                continue
+            err = torch.linalg.norm(jac - measured) / max(float(torch.linalg.norm(measured)), 1e-9)
+            scores[f"body-{key[0]}_cols+{key[1]}"] = round(float(err), 3)
+        valid = {k: v for k, v in scores.items() if v is not None}
+        best = min(valid, key=valid.get)
+        layout[side] = (int(best.split("_")[0].split("-")[1]), int(best.split("+")[1]))
+        return {
+            "jacobian_shape": list(raw_jacobian(side).shape),
+            "relative_error_by_layout": scores,
+            "chosen": best,
+            "measured_column_norms_m_per_rad": [round(float(v), 3) for v in torch.linalg.norm(measured, dim=0)],
+        }
+
+    def tip_mid(side):
+        pos = _tensor(robots[side].data.body_pos_w)[0]
+        return 0.5 * (pos[arm[side]["tips"][0]] + pos[arm[side]["tips"][1]])
+
+    def gripper_axes(side):
+        quat = _tensor(robots[side].data.body_quat_w)[0, arm[side]["gripper"]].cpu().tolist()
+        x, y, z, w = quat  # xyzw, measured on this runtime
+        m = [
+            [1 - 2 * (y * y + z * z), 2 * (x * y - z * w), 2 * (x * z + y * w)],
+            [2 * (x * y + z * w), 1 - 2 * (x * x + z * z), 2 * (y * z - x * w)],
+            [2 * (x * z - y * w), 2 * (y * z + x * w), 1 - 2 * (x * x + y * y)],
+        ]
+        return {axis: [round(m[r][c], 3) for r in range(3)] for c, axis in enumerate("xyz")}
+
+    def at_limit(side):
+        robot = robots[side]
+        limits = _tensor(robot.data.soft_joint_pos_limits)[0]
+        pos = _tensor(robot.data.joint_pos)[0]
+        hits = []
+        for j, name in zip(arm[side]["joints"], bindings[side].arm_joints):
+            lo, hi = float(limits[j, 0]), float(limits[j, 1])
+            if pos[j] <= lo + 0.02 or pos[j] >= hi - 0.02:
+                hits.append(name)
+        return hits
+
     def reach(side, goal, seconds=None, orient=False):
         """Closed-loop DLS IK on the fingertip midpoint with a measured, Broyden-updated Jacobian.
 
