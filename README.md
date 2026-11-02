@@ -24,6 +24,8 @@ Each task directory is a self-contained package (`my_package/`) with:
 
 `environments/tools/probe_runtime.py` is a read-only probe of the installed runtime (quaternion order, table geometry, YAM joints and bodies).
 
+Renders and server measurements: [docs/PROOF_OF_LIFE.md](docs/PROOF_OF_LIFE.md).
+
 ## Setup
 
 ### Server (where the simulator runs)

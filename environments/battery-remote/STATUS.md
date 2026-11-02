@@ -18,6 +18,7 @@ Isaac Lab 17.0.2 / Kit 110.3 on the L40S, via `environments/tools/probe_runtime.
   - **Polarity**: a reversed cell sits in the slot touching the spring but is not counted as seated.
   - **Open top**: a 0.6 m/s upward pull lifts the cell out, as expected with the cover removed.
   - **Start pose**: on the bare table battery_b rolled ~20 mm in 2 s and was still accelerating (that patch of the table collider is not level). With the flat 1 mm start mats and angular damping 0.5 (`226053a`), both cells drift 1.4 mm while settling onto the mat and come to 0.7 mm/s, inside the 3 mm mark margin.
+- `tools/reach_check.py` at `be1f60b` (real YAM arm, scripted damped-least-squares IK on the measured fingertip contact points, orientation-aware): the left arm reached battery_b within 2.1 mm with the gripper 3° from vertical and the fingers 2° from across the cell, closed on it (pad gap 29.1 mm vs 24.0 mm closed on nothing) and **lifted it 64 mm**. The right arm's attempt on battery_a ended 39.5 mm off and did not lift. Getting there needed stiffer arm drives (proximal 400/40, distal 150/15, 30 N m) and finger drives (400/20).
 - `launch_battery_insertion.py` at `278daba`: the Arena runner builds the scene and completes 50 zero-action steps with no false failure (`num_episodes: 0`, insertion score 0 as expected with no motion).
 
 ## Code-checked (not physics)
