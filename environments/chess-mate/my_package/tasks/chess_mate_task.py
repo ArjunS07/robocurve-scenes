@@ -127,4 +127,4 @@ class ChessMateTask(TaskBase):
         )()
 
     def get_viewer_cfg(self) -> ViewerCfg:
-        return ViewerCfg(eye=(1.20, -0.85, 1.25), lookat=(0.48, 0.0, 0.78))
+        return ViewerCfg(eye=(1.20, -0.85, 0.503), lookat=(0.48, 0.0, 0.033))

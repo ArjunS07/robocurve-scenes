@@ -71,7 +71,7 @@ Result on the Mac: `Ran 28 tests` — `OK`. The tests drive `step`, the puzzle b
 - the installed quaternion order (above)
 - whether the pieces stand, can be pinched, and stay put when a neighbour is moved
 - friction, mass, and the provisional drive gains
-- the maple table's real top height (`0.75` is a guess), and therefore every world Z
+- the maple table top is measured (z = 0.003, footprint x 0.199–0.899, y −0.478–0.522, via `environments/tools/probe_runtime.py --sim`); whether pieces actually settle on it is not yet seen in a run
 - robot base poses, home pose, reach to d1 and h5, and collisions with the board
 - USDA joint names, the `gripper` body name, and finger sign
 - camera frames

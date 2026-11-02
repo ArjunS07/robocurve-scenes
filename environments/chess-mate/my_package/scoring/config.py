@@ -217,6 +217,9 @@ def validate(cfg: ChessMateConfig) -> None:
     expected_board_z = cfg.table.top_z_m + cfg.board.thickness_m / 2.0
     if abs(cfg.board_pose.position_xyz[2] - expected_board_z) > 1e-9:
         problems.append("board pose z must be the table top plus half the board thickness")
+    for side, pose in (("left", cfg.robot.left_pose), ("right", cfg.robot.right_pose)):
+        if abs(pose.position_xyz[2] - cfg.table.top_z_m) > 1e-9:
+            problems.append(f"robot {side} base z must equal the table top")
     camera_names = [camera.name for camera in cfg.cameras]
     if camera_names != ["overhead_cam", "front_cam", "side_cam"]:
         problems.append(f"cameras must be overhead_cam, front_cam, side_cam; got {camera_names}")
