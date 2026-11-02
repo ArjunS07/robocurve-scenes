@@ -210,6 +210,18 @@ def add_link_colliders(root_prim) -> dict:
     # (an earlier scan saw 0 colliders for that reason). Instance proxies cannot be edited, so
     # de-instance them on this stage only, repeating for nested instances.
     deinstanced = 0
+    # Nothing to do when every shape already collides (the measured YAM case);
+    # skip de-instancing so the stage stays as the asset authored it.
+    shapes = [prim for prim in Usd.PrimRange(root_prim, everything) if prim.IsA(UsdGeom.Gprim)]
+    missing = [prim for prim in shapes if not prim.HasAPI(UsdPhysics.CollisionAPI)]
+    if not missing:
+        return {
+            "added": 0,
+            "already_colliders": len(shapes),
+            "instance_proxies_skipped": 0,
+            "deinstanced": 0,
+            "prim_types": {},
+        }
     for _ in range(8):
         instances = [prim for prim in Usd.PrimRange(root_prim, everything) if prim.IsInstance() and not prim.IsInstanceProxy()]
         if not instances:
