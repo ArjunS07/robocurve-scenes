@@ -190,6 +190,42 @@ def _actuator(names: tuple[str, ...] | list[str], stiffness: float, damping: flo
     )
 
 
+def add_link_colliders(root_prim) -> dict:
+    """Give every YAM link mesh a convex-hull collider. Returns counts for reporting.
+
+    The converted YAM USDA has no collision geometry at all (the source URDF has
+    none), so without this the arms pass through the board and cannot pinch a
+    piece. This edits only the spawned prims on the stage, never the shared file.
+    Instance proxies cannot be edited and are counted instead.
+    """
+    from pxr import Usd, UsdGeom, UsdPhysics
+
+    added, skipped = 0, 0
+    for prim in Usd.PrimRange(root_prim):
+        if not prim.IsA(UsdGeom.Mesh) or prim.HasAPI(UsdPhysics.CollisionAPI):
+            continue
+        if prim.IsInstanceProxy():
+            skipped += 1
+            continue
+        UsdPhysics.CollisionAPI.Apply(prim)
+        UsdPhysics.MeshCollisionAPI.Apply(prim).CreateApproximationAttr().Set(UsdPhysics.Tokens.convexHull)
+        added += 1
+    return {"added": added, "instance_proxies_skipped": skipped}
+
+
+def _spawn_yam_with_colliders(prim_path: str, cfg, *args, **kwargs):
+    base_spawn = UsdFileCfg(usd_path=cfg.usd_path).func
+    prim = base_spawn(prim_path, cfg, *args, **kwargs)
+    import isaaclab.sim as sim_utils
+
+    stage = prim.GetStage() if hasattr(prim, "GetStage") else sim_utils.get_current_stage()
+    # prim_path may be a regex such as /World/envs/env_.*/RobotLeft; colour every match.
+    for match in sim_utils.find_matching_prims(prim_path, stage=stage) if hasattr(sim_utils, "find_matching_prims") else [prim]:
+        counts = add_link_colliders(match)
+        print(f"[yam] {match.GetPath()}: added {counts['added']} link colliders, skipped {counts['instance_proxies_skipped']} instance proxies")
+    return prim
+
+
 def _articulation(cfg: ChessMateConfig, prim_path: str, pose, binding) -> ArticulationCfg:
     robot = cfg.robot
     joint_pos = {name: float(value) for name, value in zip(binding.arm_joints, robot.home_arm_rad)}
@@ -197,7 +233,13 @@ def _articulation(cfg: ChessMateConfig, prim_path: str, pose, binding) -> Articu
         joint_pos[finger] = float(robot.finger_open_m)
     return ArticulationCfg(
         prim_path=prim_path,
-        spawn=UsdFileCfg(usd_path=robot.usda_path, activate_contact_sensors=False),
+        spawn=UsdFileCfg(
+            func=_spawn_yam_with_colliders,
+            usd_path=robot.usda_path,
+            activate_contact_sensors=False,
+            # Link hulls of neighbouring links overlap at the joints.
+            articulation_props=sim_utils.ArticulationRootPropertiesCfg(enabled_self_collisions=False),
+        ),
         init_state=ArticulationCfg.InitialStateCfg(
             pos=tuple(pose.position_xyz),
             rot=tuple(pose.rotation_xyzw),

@@ -245,15 +245,35 @@ def main() -> None:
             colliders = [str(p.GetPath()) for p in Usd.PrimRange(root) if p.HasAPI(UsdPhysics.CollisionAPI)]
             whole = cache.ComputeWorldBound(root).ComputeAlignedRange()
             entry = {"collider_count": len(colliders), "colliders_sample": colliders[:6]}
-            entry["robot_bbox"] = {"min": list(whole.GetMin()), "max": list(whole.GetMax())}
+            entry["arm_bbox_at_home"] = {"min": list(whole.GetMin()), "max": list(whole.GetMax())}
+            entry["arm_past_table_near_edge_mm"] = round(1000 * max(0.0, table_min_x - whole.GetMin()[0]), 1)
             if base is not None:
-                box = cache.ComputeWorldBound(base).ComputeAlignedRange()
-                lo, hi = box.GetMin(), box.GetMax()
-                entry["base_bbox"] = {"min": list(lo), "max": list(hi)}
-                entry["base_bottom_minus_table_top_mm"] = round(1000 * (lo[2] - cfg.table.top_z_m), 2)
-                entry["base_inside_table_footprint"] = bool(
-                    lo[0] >= table_min_x and hi[0] <= table_max_x and lo[1] >= table_min_y and hi[1] <= table_max_y
-                )
+                # The links are nested under the base prim, so its bound is the whole arm.
+                # Measure only meshes whose nearest rigid-body ancestor is the base itself.
+                own = []
+                for prim in Usd.PrimRange(base):
+                    if not prim.IsA(UsdGeom.Mesh):
+                        continue
+                    owner = prim
+                    while owner and not owner.HasAPI(UsdPhysics.RigidBodyAPI):
+                        owner = owner.GetParent()
+                    if owner == base:
+                        own.append(cache.ComputeWorldBound(prim).ComputeAlignedRange())
+                if own:
+                    lo = [min(box.GetMin()[i] for box in own) for i in range(3)]
+                    hi = [max(box.GetMax()[i] for box in own) for i in range(3)]
+                    entry["base_link_bbox"] = {"min": lo, "max": hi}
+                    entry["base_bottom_minus_table_top_mm"] = round(1000 * (lo[2] - cfg.table.top_z_m), 2)
+                    entry["base_inside_table_footprint"] = bool(
+                        lo[0] >= table_min_x and hi[0] <= table_max_x and lo[1] >= table_min_y and hi[1] <= table_max_y
+                    )
+                else:
+                    entry["base_link_bbox"] = "no meshes owned by the base link"
+                # Where the arm reaches at home: +X means toward the board.
+                gripper = next((p for p in Usd.PrimRange(root) if p.GetName() == "gripper"), None)
+                if gripper is not None:
+                    tip = cache.ComputeWorldBound(gripper).ComputeAlignedRange()
+                    entry["gripper_bbox_at_home"] = {"min": list(tip.GetMin()), "max": list(tip.GetMax())}
             entry["lowest_point_minus_table_top_mm"] = round(1000 * (whole.GetMin()[2] - cfg.table.top_z_m), 2)
             result[name] = entry
         return result
