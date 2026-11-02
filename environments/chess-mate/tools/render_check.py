@@ -87,6 +87,8 @@ def main() -> None:
     parser.add_argument("--width", type=int, default=1280)
     parser.add_argument("--height", type=int, default=720)
     parser.add_argument("--out", type=Path, default=None)
+    parser.add_argument("--experience", default=None, help="Kit experience file; default: Isaac Lab's headless rendering one.")
+    parser.add_argument("--no-render", action="store_true", help="Physics and robot checks only, no camera.")
     args = parser.parse_args()
 
     sys.path.insert(0, str(args.arena_root))
@@ -100,9 +102,24 @@ def main() -> None:
     # This Isaac Lab build has no --enable_cameras on AppLauncher (it is an Arena runner
     # flag); pass it only where it exists.
     known = {action.dest for action in app_parser._actions}
-    app_argv = ["--visualizer", "none"] + (["--enable_cameras"] if "enable_cameras" in known else [])
+    # The default --visualizer none experience has no RTX engine, so a Camera fails at
+    # sim.reset ("Unable to create prim for graph at /Render/PostProcess/SDGPipeline").
+    # Isaac Lab ships a headless rendering experience for camera sensors; use it.
+    kit_files = sorted(str(path) for path in (args.arena_root / "submodules" / "IsaacLab" / "apps").glob("*.kit"))
+    experience = args.experience
+    if experience is None and not args.no_render:
+        experience = next((kit for kit in kit_files if "headless" in kit and "rendering" in kit), None)
+    app_argv = ["--visualizer", "none"]
+    if "enable_cameras" in known and not args.no_render:
+        app_argv.append("--enable_cameras")
+    if experience:
+        app_argv += ["--experience", experience]
+    camera_wiring = _grep_arena(args.arena_root, "enable_cameras")
+    # Printed before Kit starts so it survives a crash during startup.
+    print("ROBOCURVE_RENDER_SETUP", json.dumps({"app_argv": app_argv, "kit_files": kit_files, "arena_camera_wiring": camera_wiring}, indent=1), flush=True)
+    if not args.no_render and experience is None:
+        print("no headless rendering .kit found; rerun with --experience PATH or --no-render", flush=True)
     app = AppLauncher(app_parser.parse_args(app_argv)).app
-    camera_wiring = [] if "enable_cameras" in known else _grep_arena(args.arena_root, "enable_cameras")
 
     revision = _revision()
     out = args.out or ROOT / "outputs" / "render_check" / revision
@@ -157,7 +174,7 @@ def main() -> None:
         "RobotLeft": Articulation(_articulation(cfg, "/World/RobotLeft", cfg.robot.left_pose, left)),
         "RobotRight": Articulation(_articulation(cfg, "/World/RobotRight", cfg.robot.right_pose, right)),
     }
-    camera = Camera(
+    camera = None if args.no_render else Camera(
         CameraCfg(
             prim_path="/World/render_cam",
             update_period=0.0,
@@ -261,7 +278,8 @@ def main() -> None:
             saved.append(str(path))
         return saved
 
-    _stage(report, "renders", lambda: capture("", VIEWS))
+    if camera is not None:
+        _stage(report, "renders", lambda: capture("", VIEWS))
 
     def collision_overlay():
         hidden, shown = 0, 0
@@ -279,7 +297,8 @@ def main() -> None:
                 hidden += 1
         return {"colliders_shown": shown, "visual_prims_hidden": hidden, "files": capture("collision_", OVERLAY_VIEWS)}
 
-    _stage(report, "collision_overlay", collision_overlay)
+    if camera is not None:
+        _stage(report, "collision_overlay", collision_overlay)
 
     (out / "report.json").write_text(json.dumps(report, indent=1, default=str) + "\n")
     print("ROBOCURVE_RENDER_CHECK_BEGIN")
