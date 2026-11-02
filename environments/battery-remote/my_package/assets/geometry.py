@@ -732,8 +732,18 @@ def _remote_usda(cfg: BatteryInsertionConfig, numbers: dict) -> str:
         }}"""
         )
         joint_blocks.append(
-            f"""    def PhysicsPrismaticJoint "{joint}"
+            f"""    def PhysicsPrismaticJoint "{joint}" (
+        prepend apiSchemas = ["PhysicsDriveAPI:linear"]
+    )
     {{
+        # Authored drive: without PhysicsDriveAPI the joint had no PhysX drive, so the
+        # spring never moved under its target on the server (942249a, 14ff22d), although
+        # Isaac Lab reported the gains. Isaac Lab's actuator config overrides these values.
+        uniform token drive:linear:physics:type = "force"
+        float drive:linear:physics:stiffness = {_fmt(compartment.plunger_stiffness)}
+        float drive:linear:physics:damping = {_fmt(compartment.plunger_damping)}
+        float drive:linear:physics:maxForce = {_fmt(compartment.plunger_effort_limit_n)}
+        float drive:linear:physics:targetPosition = 0
         rel physics:body0 = <../chassis>
         rel physics:body1 = <../chassis/{link}>
         uniform token physics:axis = "X"

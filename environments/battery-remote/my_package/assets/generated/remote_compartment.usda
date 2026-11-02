@@ -314,8 +314,18 @@ def Xform "remote"
         quatf physics:localRot1 = (1, 0, 0, 0)
         bool physics:jointEnabled = true
     }
-    def PhysicsPrismaticJoint "slot_a_plunger"
+    def PhysicsPrismaticJoint "slot_a_plunger" (
+        prepend apiSchemas = ["PhysicsDriveAPI:linear"]
+    )
     {
+        # Authored drive: without PhysicsDriveAPI the joint had no PhysX drive, so the
+        # spring never moved under its target on the server (942249a, 14ff22d), although
+        # Isaac Lab reported the gains. Isaac Lab's actuator config overrides these values.
+        uniform token drive:linear:physics:type = "force"
+        float drive:linear:physics:stiffness = 220
+        float drive:linear:physics:damping = 6
+        float drive:linear:physics:maxForce = 5
+        float drive:linear:physics:targetPosition = 0
         rel physics:body0 = <../chassis>
         rel physics:body1 = <../chassis/slot_a_plunger_link>
         uniform token physics:axis = "X"
@@ -327,8 +337,18 @@ def Xform "remote"
         quatf physics:localRot1 = (0, 0, 0, 1)
         bool physics:jointEnabled = true
     }
-    def PhysicsPrismaticJoint "slot_b_plunger"
+    def PhysicsPrismaticJoint "slot_b_plunger" (
+        prepend apiSchemas = ["PhysicsDriveAPI:linear"]
+    )
     {
+        # Authored drive: without PhysicsDriveAPI the joint had no PhysX drive, so the
+        # spring never moved under its target on the server (942249a, 14ff22d), although
+        # Isaac Lab reported the gains. Isaac Lab's actuator config overrides these values.
+        uniform token drive:linear:physics:type = "force"
+        float drive:linear:physics:stiffness = 220
+        float drive:linear:physics:damping = 6
+        float drive:linear:physics:maxForce = 5
+        float drive:linear:physics:targetPosition = 0
         rel physics:body0 = <../chassis>
         rel physics:body1 = <../chassis/slot_b_plunger_link>
         uniform token physics:axis = "X"

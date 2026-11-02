@@ -209,6 +209,13 @@ class GeometryTests(unittest.TestCase):
         # A sleeping remote ignored spring-drive targets on the server; it must never sleep.
         self.assertIn("ArticulationRootPropertiesCfg(sleep_threshold=0.0, stabilization_threshold=0.0)", spawn)
 
+    def test_plunger_joints_author_a_linear_drive(self):
+        with tempfile.TemporaryDirectory() as directory:
+            text = write_geometry(self.cfg, directory)["remote"].read_text()
+        self.assertEqual(text.count('prepend apiSchemas = ["PhysicsDriveAPI:linear"]'), 2)
+        self.assertEqual(text.count("drive:linear:physics:targetPosition = 0"), 2)
+        self.assertIn(f"drive:linear:physics:stiffness = {self.cfg.compartment.plunger_stiffness:g}", text)
+
     def test_remote_articulation_never_sleeps_in_usd(self):
         with tempfile.TemporaryDirectory() as directory:
             text = write_geometry(self.cfg, directory)["remote"].read_text()
