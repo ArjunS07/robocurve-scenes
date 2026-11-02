@@ -157,9 +157,8 @@ def main() -> None:
             for asset in assets:
                 asset.update(dt)
 
-    def jacobian(side):
-        robot = robots[side]
-        view = getattr(robot, "root_physx_view", None) or getattr(robot, "root_view", None)
+    def raw_jacobian(side):
+        view = getattr(robots[side], "root_physx_view", None) or getattr(robots[side], "root_view", None)
         jac = _tensor(view.get_jacobians())
         if not isinstance(jac, torch.Tensor):
             # This build can hand back a Warp/proxy array; list indexing on it fails.
@@ -169,13 +168,55 @@ def main() -> None:
                 jac = wp.to_torch(jac)
             except Exception:
                 jac = torch.as_tensor(jac, device=device)
-        fixed = bool(getattr(robot, "is_fixed_base", True))
-        # Fixed base: the root body has no Jacobian row. Floating base (the YAM arms report
-        # is_fixed_base False here even though root_joint anchors them): 6 root columns come first.
-        body = arm[side]["gripper"] - (1 if fixed else 0)
-        cols = arm[side]["joints"] if fixed else [j + 6 for j in arm[side]["joints"]]
+        return jac
+
+    # Which Jacobian row/column convention this build uses is decided by measurement
+    # (calibrate()), not assumed: the cda9d37 run with the assumed one never converged.
+    layout = {}
+
+    def jacobian_variant(side, body_shift, col_shift):
+        jac = raw_jacobian(side)
+        body = arm[side]["gripper"] - body_shift
+        cols = [j + col_shift for j in arm[side]["joints"]]
+        if not (0 <= body < jac.shape[1]) or max(cols) >= jac.shape[3]:
+            return None
         jac_body = jac[0, body, :3, :]
         return jac_body[:, torch.tensor(cols, device=jac_body.device)]
+
+    def jacobian(side):
+        body_shift, col_shift = layout[side]
+        return jacobian_variant(side, body_shift, col_shift)
+
+    def calibrate(side, delta=0.05):
+        """Measure d(tip)/d(joint) by nudging each arm joint, then pick the matching layout."""
+        base_targets = targets[side].clone()
+        step(int(0.5 / dt))
+        p0 = tip_mid(side).clone()
+        variants = {(b, c): jacobian_variant(side, b, c) for b in (0, 1) for c in (0, 6)}
+        measured = []
+        for j in arm[side]["joints"]:
+            targets[side][0, j] = base_targets[0, j] + delta
+            step(int(0.6 / dt))
+            measured.append(((tip_mid(side) - p0) / delta).clone())
+            targets[side] = base_targets.clone()
+            step(int(0.6 / dt))
+        measured = torch.stack(measured, dim=1)  # 3 x 6
+        scores = {}
+        for key, jac in variants.items():
+            if jac is None:
+                scores[f"body-{key[0]}_cols+{key[1]}"] = None
+                continue
+            err = torch.linalg.norm(jac - measured) / max(float(torch.linalg.norm(measured)), 1e-9)
+            scores[f"body-{key[0]}_cols+{key[1]}"] = round(float(err), 3)
+        valid = {k: v for k, v in scores.items() if v is not None}
+        best = min(valid, key=valid.get)
+        layout[side] = (int(best.split("_")[0].split("-")[1]), int(best.split("+")[1]))
+        return {
+            "jacobian_shape": list(raw_jacobian(side).shape),
+            "relative_error_by_layout": scores,
+            "chosen": best,
+            "measured_column_norms_m_per_rad": [round(float(v), 3) for v in torch.linalg.norm(measured, dim=0)],
+        }
 
     def tip_mid(side):
         pos = _tensor(robots[side].data.body_pos_w)[0]
@@ -242,6 +283,11 @@ def main() -> None:
         step(int(1.5 / dt))
 
     step(int(1.0 / dt))
+    report["jacobian_calibration"] = {}
+    for side in robots:
+        # Fixed-base convention as the fallback if calibration itself fails.
+        layout[side] = (1, 0)
+        _stage(report["jacobian_calibration"], side, lambda side=side: calibrate(side))
     report["arms"] = {
         side: {
             "is_fixed_base": bool(getattr(robots[side], "is_fixed_base", None)),
