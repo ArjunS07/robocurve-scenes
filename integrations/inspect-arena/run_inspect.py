@@ -28,6 +28,7 @@ def main():
     parser.add_argument('--mode', choices=('capture', 'hold', 'agent', 'reach-check'), default='capture')
     parser.add_argument('--steps', type=int, default=50)
     parser.add_argument('--control-interface', choices=('eef_pos','joints'), default='eef_pos')
+    parser.add_argument('--servo-profile',choices=('auto','scene','tracking'),default='auto')
     parser.add_argument('--episode-seconds', type=float,
                         help='Override simulation-time timeout for this run; recorded as modified task timing')
     parser.add_argument('--arena-root', type=Path, default=Path('/home/ubuntu/workspace/IsaacLab-Arena'))
@@ -111,6 +112,7 @@ def main():
     with open_scene(args, output) as (adapter, instruction):
         provenance.update(adapter.base._robocurve_inspect_episode_budget)
         provenance['control_hz'] = adapter.info.control_hz
+        provenance['servo_settings'] = adapter.base._robocurve_inspect_servo_report
         max_episode = max(1, math.ceil(float(adapter.base.cfg.episode_length_s) * adapter.info.control_hz))
         provenance['effective_max_environment_steps'] = min(args.steps, max_episode)
         (output / 'run.json').write_text(json.dumps(provenance, indent=2) + '\n')

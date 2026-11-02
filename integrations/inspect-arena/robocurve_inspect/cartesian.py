@@ -105,7 +105,17 @@ class CartesianEmbodiment(ArenaEmbodiment):
         return self._joint_previous.copy()
 
     def control_report(self):
+        drives=[]
+        for _,asset,_,_ in self._resolved:
+            values={}
+            for key in ('joint_stiffness','joint_damping','joint_effort_limits','joint_effort_limit','joint_velocity_limits'):
+                try: value=getattr(asset.data,key,None)
+                except (AttributeError,NotImplementedError): continue
+                if value is not None: values[key]=array(value).tolist()
+            drives.append(values)
         return {'interface':'eef_pos','labels':list(EEF_LABELS),'units':'m,rad,normalized',
+                'servo_settings':getattr(self.base,'_robocurve_inspect_servo_report',None),
+                'measured_drive_properties':drives,
                 'arms':[{'calibration':kin.calibration,'measured_position_base_m':kin.pose()['position'].tolist(),
                          'measured_position_world_m':kin.pose()['world_position'].tolist(),
                          'reference_rotation_base':ref.tolist()}

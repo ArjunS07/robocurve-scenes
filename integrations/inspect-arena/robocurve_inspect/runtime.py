@@ -48,6 +48,23 @@ def configure_episode_limit(env_cfg, seconds):
             'task_timing_modified': effective != configured}
 
 
+def configure_servos(env_cfg, arms, profile):
+    """Set a run-local position-tracking profile without changing scene files."""
+    report={'profile':profile,'groups':[]}
+    if profile=='scene': return report
+    if profile!='tracking': raise ValueError(f'Unknown servo profile {profile}')
+    for arm in arms:
+        cfg=getattr(env_cfg.scene,arm.asset)
+        for name,actuator in cfg.actuators.items():
+            fingers='finger' in name.lower() or 'grip' in name.lower()
+            old={'stiffness':actuator.stiffness,'damping':actuator.damping}
+            actuator.stiffness=400.
+            actuator.damping=8. if fingers else 40.
+            report['groups'].append({'asset':arm.asset,'group':name,'original':old,
+                                     'effective':{'stiffness':actuator.stiffness,'damping':actuator.damping}})
+    return report
+
+
 def install_terminal_recorder(env_cfg):
     from isaaclab.managers.recorder_manager import RecorderTerm, RecorderTermCfg, RecorderManagerBaseCfg
     from isaaclab.utils import configclass
@@ -133,6 +150,10 @@ def open_scene(args, output):
                 geometry.GENERATED_DIR = output / 'generated'
             builder = get_arena_builder_from_cli(native)
             env_cfg, env_kwargs = builder.compose_manager_cfg()
+            arms=scene_arms(args.scene,builder.arena_env.task.cfg)
+            profile=getattr(args,'servo_profile','auto')
+            if profile=='auto': profile='tracking' if getattr(args,'control_interface','eef_pos')=='eef_pos' else 'scene'
+            servo_report=configure_servos(env_cfg,arms,profile)
             episode_budget = configure_episode_limit(env_cfg, getattr(args, 'episode_seconds', None))
             install_terminal_recorder(env_cfg)
             env_cfg.recorders.dataset_export_dir_path = str(output / 'arena')
@@ -140,6 +161,7 @@ def open_scene(args, output):
                 env = builder.make_registered(env_cfg=env_cfg, env_kwargs=env_kwargs)
                 base = env.unwrapped
                 base._robocurve_inspect_episode_budget = episode_budget
+                base._robocurve_inspect_servo_report = servo_report
                 task = builder.arena_env.task
                 cfg = task.cfg
                 base._robocurve_inspect_task_cfg = cfg

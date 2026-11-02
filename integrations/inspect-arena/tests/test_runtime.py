@@ -6,7 +6,7 @@ from types import SimpleNamespace as NS
 import unittest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from robocurve_inspect.runtime import configure_episode_limit, rendering_args
+from robocurve_inspect.runtime import configure_episode_limit, configure_servos, rendering_args
 
 
 class RenderingBootstrapTests(unittest.TestCase):
@@ -59,3 +59,20 @@ class EpisodeBudgetTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 configure_episode_limit(cfg, invalid)
             self.assertEqual(cfg.episode_length_s, 90.)
+
+
+class ServoProfileTests(unittest.TestCase):
+    def test_tracking_profile_changes_gains_but_keeps_torque_limits(self):
+        proximal=NS(stiffness=80.,damping=8.,effort_limit=20.)
+        fingers=NS(stiffness=40.,damping=2.,effort_limit=10.)
+        cfg=NS(scene=NS(robot=NS(actuators={'left_proximal':proximal,'left_fingers':fingers})))
+        report=configure_servos(cfg,[NS(asset='robot')],'tracking')
+        self.assertEqual((proximal.stiffness,proximal.damping),(400.,40.))
+        self.assertEqual((fingers.stiffness,fingers.damping),(400.,8.))
+        self.assertEqual(proximal.effort_limit,20.)
+        self.assertEqual(fingers.effort_limit,10.)
+        self.assertEqual(report['groups'][0]['original'],{'stiffness':80.,'damping':8.})
+
+    def test_scene_profile_leaves_existing_settings_unchanged(self):
+        cfg=NS(scene=None)
+        self.assertEqual(configure_servos(cfg,[],'scene'),{'profile':'scene','groups':[]})

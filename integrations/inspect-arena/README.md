@@ -9,7 +9,7 @@ Local tests use the exact reported server SDK versions, built from Inspect Robot
 - `inspect-robots 0.0.1.dev1+gc8a821ba7`
 - `inspect-robots-agent 0.29.0`
 
-34 tests pass with fake simulator data, including the real agent with a mocked OpenRouter response and the real Inspect eval/logging loop. No paid calls occur in these tests.
+36 tests pass with fake simulator data, including the real agent with a mocked OpenRouter response and the real Inspect eval/logging loop. No paid calls occur in these tests.
 
 The server has verified the scene/camera bootstrap, Argon communication, raw-joint motion, and MP4 export. **The new Cartesian control path and live CAD/Jacobian calibration still require the server reach check below.** A broken scene still needs to be fixed in that scene. Passing the reach check establishes local tracking, not a successful piece grasp or chess benchmark.
 
@@ -25,11 +25,13 @@ Run this first with your own preview stopped:
 cd /home/ubuntu/workspace/robocurve-scenes
 /home/ubuntu/workspace/IsaacLab-Arena/.venv/bin/python \
   integrations/inspect-arena/run_inspect.py --scene chess-mate \
-  --mode reach-check --control-interface eef_pos --steps 480 \
+  --mode reach-check --control-interface eef_pos --servo-profile tracking --steps 600 \
   --stream --public-ip 160.211.46.91
 ```
 
-This makes zero model calls. It raises each grasp point 15 mm, closes its gripper by 10%, reopens it, and returns it while the other arm holds. It records the measured position/orientation/opening errors in `reach_check.json`, saves all three frame streams, and exports `rollout.mp4`. A phase fails when tracking does not settle within 3 mm, 0.04 rad, and 0.03 normalized opening, or when the task terminates. Errors above 50 mm or 0.3 rad abort early. `reach_trace.jsonl` records the commanded and measured EEF/joint state at each step. Inspect both the report and the video before a paid task attempt.
+This makes zero model calls. It first checks that both grippers hold home, then raises each grasp point 15 mm, closes its gripper by 10%, reopens it, and returns it while the other arm holds. It records the measured position/orientation/opening errors in `reach_check.json`, saves all three frame streams, and exports `rollout.mp4`. A phase fails when tracking does not settle within 3 mm, 0.04 rad, and 0.03 normalized opening, or when the task terminates. Errors above 50 mm or 0.3 rad abort early. `reach_trace.jsonl` records the commanded and measured EEF/joint state at each step. Inspect both the report and the video before a paid task attempt.
+
+Cartesian runs default to the run-local `tracking` servo profile: arm stiffness/damping 400/40 and finger stiffness/damping 400/8. Torque limits remain the scene's original limits. The earlier scene profile (80/8 proximal, 20/2 distal, 40/2 fingers for chess) sagged under gravity before a 15 mm reach could be tested. `--servo-profile scene` retains that original profile; `auto` chooses tracking for EEF and scene for raw joints. Original/effective gains are saved in `run.json`; available measured stiffness, damping and drive limits are saved in `control_setup.json`. These controller changes do not rewrite scene YAML or USD files.
 
 The measured `eef_state` drives Cartesian interpolation. Observations also retain joint angles, both world base transforms, world grasp positions, and tool-axis directions. Native Arena action mapping, cameras, scoring and MP4 recording are retained. `last_task_result.json` saves the last task score and hard-failure reasons; terminal reasons are printed too.
 

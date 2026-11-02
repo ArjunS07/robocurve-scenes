@@ -139,7 +139,7 @@ class CartesianContractTests(unittest.TestCase):
             report=run_reach_check(adapter,Scene('test','Tracking check'),output)
             self.assertTrue(report['passed'])
             self.assertEqual(report['model_calls'],0)
-            self.assertEqual(len(report['phases']),8)
+            self.assertEqual(len(report['phases']),9)
             self.assertTrue((output/'reach_check.json').exists())
             frames=list((output/'inspect/frames').rglob('*.npy'))
             self.assertGreater(len(frames),3)
