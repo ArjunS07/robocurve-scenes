@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import math
+
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -89,6 +91,8 @@ class PhysicsSpec:
     # Caps how fast PhysX pushes overlapping bodies apart. Uncapped, a 5 g nut was flung
     # ~0.7 m when driven at 5 mN m (server sweep at c715f9a).
     max_depenetration_velocity_m_s: float
+    nut_speculative_ccd: bool
+    nut_max_angular_velocity_deg_s: float
 
 
 @dataclass(frozen=True)
@@ -155,6 +159,12 @@ def _number(value, path: str) -> float:
     if isinstance(value, bool) or not isinstance(value, (int, float)):
         raise ValueError(f"{path} must be a number")
     return float(value)
+
+
+def _flag(value, path: str) -> bool:
+    if not isinstance(value, bool):
+        raise ValueError(f"{path} must be true or false, got {value!r}")
+    return value
 
 
 def _integer(value, path: str) -> int:
@@ -285,7 +295,14 @@ def parse_config(data: dict) -> NutThreadingConfig:
     physics_data = _mapping(root["physics"], "physics")
     _exact_keys(
         physics_data,
-        ("contact_offset_m", "solver_position_iterations", "solver_velocity_iterations", "max_depenetration_velocity_m_s"),
+        (
+            "contact_offset_m",
+            "solver_position_iterations",
+            "solver_velocity_iterations",
+            "max_depenetration_velocity_m_s",
+            "nut_speculative_ccd",
+            "nut_max_angular_velocity_deg_s",
+        ),
         "physics",
     )
     robot_data = _mapping(root["robot"], "robot")
@@ -379,6 +396,10 @@ def parse_config(data: dict) -> NutThreadingConfig:
             ),
             max_depenetration_velocity_m_s=_number(
                 physics_data["max_depenetration_velocity_m_s"], "physics.max_depenetration_velocity_m_s"
+            ),
+            nut_speculative_ccd=_flag(physics_data["nut_speculative_ccd"], "physics.nut_speculative_ccd"),
+            nut_max_angular_velocity_deg_s=_number(
+                physics_data["nut_max_angular_velocity_deg_s"], "physics.nut_max_angular_velocity_deg_s"
             ),
         ),
         robot=RobotSpec(
@@ -484,6 +505,8 @@ def validate_config(config: NutThreadingConfig) -> None:
         raise ValueError("solver iterations must be at least 16 position and 1 velocity")
     if not 0.0 < config.physics.max_depenetration_velocity_m_s <= 1.0:
         raise ValueError("max_depenetration_velocity_m_s must be in (0, 1] m/s")
+    if not 360.0 <= config.physics.nut_max_angular_velocity_deg_s <= 7200.0:
+        raise ValueError("nut_max_angular_velocity_deg_s must be 1-20 turns/s (360-7200 deg/s)")
     names = [camera.name for camera in config.cameras]
     if names != ["overhead", "front", "side"]:
         raise ValueError(f"cameras must be overhead, front, side in that order, got {names}")
@@ -521,13 +544,13 @@ def _validate_thread(fastener: FastenerSpec) -> None:
         raise ValueError("thread radii must satisfy core < pin tip < major < bore")
     if fastener.hole_radius_m >= fastener.across_flats_m / 2.0:
         raise ValueError("nut bore must be inside the hex flats")
-    if fastener.pin_count != 3:
-        raise ValueError("pin_count must be 3 (three-point support keeps the nut level)")
+    if fastener.pin_count < 3:
+        raise ValueError("pin_count must be at least 3 to support the nut")
     if fastener.segments_per_turn < 12:
         raise ValueError("segments_per_turn must be at least 12")
-    if fastener.pin_count > 1 and (fastener.segments_per_turn % fastener.pin_count) == 0:
+    if math.gcd(fastener.segments_per_turn, fastener.pin_count) != 1:
         raise ValueError(
-            "segments_per_turn must not be a multiple of pin_count, or every pin crosses a ridge seam at once"
+            "segments_per_turn must share no factor with pin_count, or several pins cross a ridge seam at once"
         )
     span = fastener.pitch_m * (fastener.pin_count - 1) / fastener.pin_count + fastener.pin_thickness_m
     if span >= fastener.nut_height_m / 2.0:

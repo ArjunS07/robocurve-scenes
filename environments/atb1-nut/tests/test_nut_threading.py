@@ -549,7 +549,7 @@ class GeometryTests(unittest.TestCase):
         f = cfg.fastener
         travel = required_travel_m(cfg)
         layout = pin_layout(cfg)
-        self.assertEqual(len(layout), 3)
+        self.assertEqual(len(layout), f.pin_count)
         for psi_turns in (0.1, 1.0, 2.37, 4.5, f.turns):
             psi = 2.0 * math.pi * psi_turns
             gap = travel - f.pitch_m * psi_turns
@@ -764,6 +764,22 @@ if __name__ == "__main__":
 
 
 class TaskTermParamsTests(unittest.TestCase):
+    def test_nut_has_speculative_ccd_and_a_spin_cap(self):
+        import tempfile, os
+
+        cfg = load_config()
+        with tempfile.TemporaryDirectory() as directory, unittest.mock.patch.dict(os.environ, {"ROBOCURVE_GENERATED_DIR": directory}):
+            from my_package.assets.geometry import ensure_generated_assets
+
+            nut_usd, fixture_usd = ensure_generated_assets(cfg)
+            nut, fixture = Path(nut_usd).read_text(), Path(fixture_usd).read_text()
+        self.assertIn("physxRigidBody:enableSpeculativeCCD = true", nut)
+        self.assertIn("physxRigidBody:maxAngularVelocity = 1440", nut)
+        self.assertEqual(nut.count('def Cube "pin_'), cfg.fastener.pin_count)
+        # The kinematic fixture does not need either.
+        self.assertNotIn("enableSpeculativeCCD", fixture)
+        self.assertEqual(math.gcd(cfg.fastener.segments_per_turn, cfg.fastener.pin_count), 1)
+
     def test_frozen_config_is_not_passed_through_term_params(self):
         # Isaac Lab's configclass post-init assigns into params and raised
         # FrozenInstanceError on the server when the NutConfig was passed there.

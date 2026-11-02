@@ -97,7 +97,7 @@ def main() -> None:
     )
     parser.add_argument(
         "--torque-sweep",
-        default="0.002,0.005,0.01,0.02",
+        default="0.002,0.005,0.01,0.02,0.05",
         help="Comma-separated torque caps (N m) tried in a sweep before the main stages; '' skips it.",
     )
     parser.add_argument("--width", type=int, default=1280)

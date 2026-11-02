@@ -351,7 +351,14 @@ def _rigid_body_lines(mass_kg: float, material_path: str, cfg: NutThreadingConfi
         f"    int physxRigidBody:solverVelocityIterationCount = {physics.solver_velocity_iterations}",
         f"    float physxRigidBody:maxDepenetrationVelocity = {_fmt(physics.max_depenetration_velocity_m_s)}",
         f"    rel material:binding:physics = <{material_path}>",
-    ]
+    ] + (
+        []
+        if kinematic
+        else [
+            f"    bool physxRigidBody:enableSpeculativeCCD = {'true' if physics.nut_speculative_ccd else 'false'}",
+            f"    float physxRigidBody:maxAngularVelocity = {_fmt(physics.nut_max_angular_velocity_deg_s)}",
+        ]
+    )
 
 
 _RIGID_SCHEMAS = '["PhysicsRigidBodyAPI", "PhysicsMassAPI", "PhysxRigidBodyAPI", "MaterialBindingAPI"]'

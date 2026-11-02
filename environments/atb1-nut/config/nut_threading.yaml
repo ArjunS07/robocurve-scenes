@@ -19,10 +19,12 @@ fastener:
   pin_tip_radius_m: 0.0035
   pin_thickness_m: 0.0005
   pin_width_m: 0.0012
-  pin_count: 3
-  # 32, not 24: with 24 the three pins (120 deg apart = 8 segments) crossed box seams in
-  # lockstep, and the bc99711 server run stalled at 0.39 turns. 120 deg is 10.67 segments here.
-  segments_per_turn: 32
+  # 6, not 3: the turning load is shared by twice the contacts, so each pin presses less into
+  # the 0.5 mm ridge (3 pins skipped or were thrown off above ~5 mN m, be4c8c8 sweep).
+  pin_count: 6
+  # Coprime with pin_count so every pin crosses a ridge seam at a different moment. With 24
+  # segments and 3 pins all three crossed together and stalled at 0.39 turns (bc99711).
+  segments_per_turn: 35
   # Thread parts only. This is the contact DETECTION margin (restOffset is 0, so it adds no
   # gap). It must exceed the nut's per-step travel: at 0.04 mm the 942249a server run showed
   # pins crossing the 0.5 mm ridge midline in one step and being pushed out downward, so the
@@ -88,6 +90,12 @@ physics:
   solver_velocity_iterations: 1
   # Gentle depenetration: uncapped, the nut was flung ~0.7 m at 5 mN m.
   max_depenetration_velocity_m_s: 0.05
+  # Per-body speculative CCD on the nut: contacts are generated ahead of fast motion, so thin
+  # pins cannot tunnel through the ridge. Needs no scene-wide CCD flag.
+  nut_speculative_ccd: true
+  # Spin cap, deg/s (PhysX unit). 1440 = 4 turns/s, far above any robot turning rate; it stops
+  # the spin-up after a seam snag that threw the nut off at 10-20 mN m.
+  nut_max_angular_velocity_deg_s: 1440.0
 
 robot:
   # Absolute path of the shared converted asset; YAM_USD overrides it. Not edited by this package.
