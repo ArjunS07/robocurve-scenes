@@ -1,0 +1,23 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.venv/
+venv/
+# Editor and OS
+.DS_Store
+.idea/
+.vscode/
+# Local publish state
+.herenow/
+# Isaac Sim / Kit caches and logs
+*.log
+_build/
+omni_logs/
+kit_*/
+.nvidia-omniverse/
+# Runtime outputs: generated assets, runner reports, captures, physics checks
+outputs/

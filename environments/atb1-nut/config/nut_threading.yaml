@@ -1,0 +1,116 @@
+# One approximate M8 x 1.25 nut-and-stud station inspired by NIST Assembly Task Board 1.
+# It is not the full ATB1 board and not the NIST CAD. Dimensions below are approximations.
+task_description: Tighten the nut onto the bolt.
+episode_length_s: 120
+
+fastener:
+  nominal: M8
+  pitch_m: 0.00125
+  turns: 6.5
+  # Physical thread: the stud is a core cylinder plus a helical ridge of tilted convex boxes;
+  # the nut bore carries pin_count pins that ride in the groove (assets/geometry.py).
+  # M8 major diameter 8 mm; minor about 6.5 mm. The core is slightly fatter than the minor.
+  core_radius_m: 0.0033
+  major_radius_m: 0.0040
+  # Nut bore wall. 0.3 mm clear of the ridge so only the pins touch the thread.
+  hole_radius_m: 0.0043
+  ridge_thickness_m: 0.0005
+  # Pins reach 0.2 mm short of the core (radial play) and overlap the ridge by 0.5 mm.
+  pin_tip_radius_m: 0.0035
+  pin_thickness_m: 0.0005
+  pin_width_m: 0.0012
+  pin_count: 3
+  segments_per_turn: 24
+  # Thread parts only. Must stay well below the 0.1 mm per-side clearances above.
+  thread_contact_offset_m: 0.00004
+  across_flats_m: 0.013
+  nut_height_m: 0.0068
+  nut_mass_kg: 0.005
+  lead_in_m: 0.002
+  # Steel on steel, provisional. Authored as a USD physics material on the nut and fixture.
+  static_friction: 0.6
+  dynamic_friction: 0.45
+
+table:
+  # Measured on the server (environments/tools/probe_runtime.py --sim): maple_table_robolab
+  # spawns at the origin; collision top z = 0.003, footprint x [0.1986, 0.8986], y [-0.4779, 0.5221].
+  center_xy: [0.5486, 0.0221]
+  half_extents_xy: [0.35, 0.50]
+  top_z_m: 0.003
+  fall_below_m: 0.05
+
+fixture_pose:
+  position_xyz: [0.55, 0.0, 0.019]
+  rotation_xyzw: [0.0, 0.0, 0.0, 1.0]
+
+nut_pose:
+  position_xyz: [0.55, 0.15, 0.0064]
+  rotation_xyzw: [0.0, 0.0, 0.0, 1.0]
+
+# The fixture is a kinematic rigid body: immovable by contact, no articulation, no weld joint.
+fixture_body:
+  plate_thickness_m: 0.010
+  collar_height_m: 0.006
+  mass_kg: 0.4
+
+scoring:
+  lift_clearance_m: 0.015
+  fixture_motion_tolerance_m: 0.005
+  # The fixture is kinematic, so these only fire if a reset or another writer moves it.
+  fixture_rotation_tolerance_deg: 5.0
+  # A threaded nut tilts at most about 2.5 deg (pin play in the groove); a nut jammed on the
+  # ridge can reach the jam tilt (about 5.4 deg). 3 deg separates them; the loader checks both.
+  wedge_angle_deg: 3.0
+  radial_max_m: 0.0006
+  track_radial_m: 0.004
+  track_tilt_deg: 20.0
+  min_engagement_turns: 0.5
+  turn_tolerance: 0.5
+  seat_gap_m: 0.001
+  deep_fraction: 0.75
+
+grasp:
+  # GEOMETRIC PROXY. The `gripper` body within radius_m of the nut, fingers between min and max open.
+  # Fingers shut on nothing read ~0 open, so the min keeps an empty closed gripper from counting.
+  radius_m: 0.055
+  hold_open_fraction_min: 0.05
+  hold_open_fraction_max: 0.35
+
+physics:
+  contact_offset_m: 0.0003
+  solver_position_iterations: 16
+  solver_velocity_iterations: 1
+
+robot:
+  # Absolute path of the shared converted asset; YAM_USD overrides it. Not edited by this package.
+  usd_path: /home/ubuntu/workspace/robocurve/assets/yam/yam_source_resolved/yam_source_resolved.usda
+  layout: duplicated_single_arm
+  home_arm_rad: [0.4, 1.2, 1.0, -0.5, 0.0, 0.0]
+  finger_open_m: -0.04695
+  finger_closed_m: 0.0
+  # On the tabletop, 5 cm inside its near edge (x = 0.1986). The station is 0.30 m in front.
+  # Base z assumes the YAM root frame is at the bottom of its base; not yet checked on the server.
+  left_base_xyz: [0.25, 0.22, 0.003]
+  right_base_xyz: [0.25, -0.22, 0.003]
+  # Measured in the converted YAM USDA: bodies base, link1..link5, gripper, tip_left, tip_right.
+  gripper_body_name: gripper
+  # Provisional implicit gains, stiffer than battery-remote's 80/20/40 so gravity sag stays
+  # small. Not a calibration of the real YAM motors.
+  actuators:
+    proximal: {stiffness: 400.0, damping: 40.0, effort: 20.0, velocity: 3.0}
+    distal: {stiffness: 150.0, damping: 15.0, effort: 10.0, velocity: 3.0}
+    finger: {stiffness: 400.0, damping: 20.0, effort: 10.0, velocity: 0.2}
+
+cameras:
+  - name: overhead
+    eye_xyz: [0.55, 0.0, 0.703]
+    target_xyz: [0.55, 0.0, 0.033]
+    rotation_xyzw: [1.0, 0.0, 0.0, 0.0]
+  - name: front
+    eye_xyz: [1.12, 0.0, 0.303]
+    target_xyz: [0.55, 0.0, 0.033]
+    rotation_xyzw: [-0.5975128334895923, 0.5975128334895922, 0.3781248653754985, -0.3781248653754985]
+  - name: side
+    eye_xyz: [0.55, -0.70, 0.253]
+    target_xyz: [0.55, 0.0, 0.033]
+    rotation_xyzw: [0.0, 0.8061720029684715, 0.5916812500238644, 0.0]
