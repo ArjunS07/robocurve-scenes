@@ -180,13 +180,17 @@ robot:
   # Provisional implicit-actuator gains. They are not the motor kp/kd in yam_v1.yml
   # and they are not a calibration. They override the URDF's placeholder effort of 1
   # only inside the simulator config. The USDA file is not modified.
-  proximal_stiffness: 80.0
-  proximal_damping: 8.0
-  distal_stiffness: 20.0
-  distal_damping: 2.0
+  # Raised from 80/8 and 20/2 (effort 20): in the reach check (8606c5d) joints 2 and 3
+  # sagged 0.11-0.16 rad below their targets whenever the arm reached toward the table, so
+  # the fingertips stopped 50-150 mm short. 400/40 and 150/15 match the nut scene; the 30 N m
+  # effort limit is an ESTIMATE of a shoulder-class actuator's peak, not a YAM datasheet value.
+  proximal_stiffness: 400.0
+  proximal_damping: 40.0
+  distal_stiffness: 150.0
+  distal_damping: 15.0
   finger_stiffness: 40.0
   finger_damping: 2.0
-  arm_effort_limit: 20.0
+  arm_effort_limit: 30.0
   arm_velocity_limit: 3.0
   finger_effort_limit: 10.0
   finger_velocity_limit: 0.2
