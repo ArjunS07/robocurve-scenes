@@ -1,9 +1,10 @@
 """USD objects for the compartment and the cells.
 
-UsdFileCfg's rigid-body fields are the same ones Arena's procedural cuboids use
-on CuboidCfg. The 0.3.1 tag itself only passes usd_path, scale, and
-activate_contact_sensors to UsdFileCfg. If this Isaac Lab build rejects the
-extra fields, startup fails immediately and the fields should be dropped.
+Friction and restitution are authored as USD physics materials in the
+generated files. ``physics_material`` is a field of Isaac Lab's procedural
+shape configs, not of ``UsdFileCfg``, so it is not passed here. ``rigid_props``,
+``collision_props``, ``mass_props``, and ``articulation_props`` are fields of
+Isaac Lab's file spawner config.
 """
 
 from __future__ import annotations
@@ -16,7 +17,8 @@ from isaaclab_arena.assets.object import Object
 from isaaclab_arena.assets.object_type import ObjectType
 from isaaclab_arena.utils.pose import Pose
 
-from my_package.scoring.config import BatteryInsertionConfig, active_slots
+from my_package.assets.physics_props import battery_physics, remote_physics
+from my_package.scoring.config import BatteryInsertionConfig, active_slots, battery_pose, plunger_joint_name
 
 
 class ConfiguredUsdObject(Object):
@@ -36,6 +38,7 @@ class ConfiguredUsdObject(Object):
                 activate_contact_sensors=False,
             )
         physics = self._physics
+        mass = physics.get("mass_kg")
         return UsdFileCfg(
             usd_path=self.usd_path,
             scale=self.scale,
@@ -46,11 +49,12 @@ class ConfiguredUsdObject(Object):
                 disable_gravity=False,
             ),
             collision_props=sim_utils.CollisionPropertiesCfg(contact_offset=physics["contact_offset_m"]),
-            mass_props=(None if self._actuators else sim_utils.MassPropertiesCfg(mass=physics["mass_kg"])),
-            physics_material=sim_utils.RigidBodyMaterialCfg(
-                static_friction=physics["static_friction"],
-                dynamic_friction=physics["dynamic_friction"],
-                restitution=physics["restitution"],
+            # None keeps the USD-authored per-body masses.
+            mass_props=None if mass is None else sim_utils.MassPropertiesCfg(mass=mass),
+            articulation_props=(
+                sim_utils.ArticulationRootPropertiesCfg(fix_root_link=True)
+                if physics.get("fix_root_link")
+                else None
             ),
         )
 
@@ -81,39 +85,10 @@ class ConfiguredUsdObject(Object):
         return cfg
 
 
-def _remote_physics(cfg: BatteryInsertionConfig) -> dict:
-    compartment = cfg.compartment
-    return {
-        "solver_position_iterations": compartment.solver_position_iterations,
-        "solver_velocity_iterations": compartment.solver_velocity_iterations,
-        "contact_offset_m": compartment.contact_offset_m,
-        "mass_kg": compartment.mass_kg,
-        "static_friction": compartment.static_friction,
-        "dynamic_friction": compartment.dynamic_friction,
-        "restitution": compartment.restitution,
-        "contacts": cfg.scoring.enable_contact_sensors,
-    }
-
-
-def _battery_physics(cfg: BatteryInsertionConfig) -> dict:
-    battery = cfg.battery
-    compartment = cfg.compartment
-    return {
-        "solver_position_iterations": compartment.solver_position_iterations,
-        "solver_velocity_iterations": compartment.solver_velocity_iterations,
-        "contact_offset_m": compartment.contact_offset_m,
-        "mass_kg": battery.mass_kg,
-        "static_friction": battery.static_friction,
-        "dynamic_friction": battery.dynamic_friction,
-        "restitution": battery.restitution,
-        "contacts": cfg.scoring.enable_contact_sensors,
-    }
-
-
 def _plunger_actuators(cfg: BatteryInsertionConfig):
     from isaaclab.actuators import ImplicitActuatorCfg
 
-    names = [slot.name.replace("battery_", "slot_") + "_plunger" for slot in active_slots(cfg)]
+    names = [plunger_joint_name(slot) for slot in active_slots(cfg)]
     compartment = cfg.compartment
     return {
         "plungers": ImplicitActuatorCfg(
@@ -134,21 +109,22 @@ def make_remote(cfg: BatteryInsertionConfig, usd_path: str) -> ConfiguredUsdObje
         object_type=ObjectType.ARTICULATION,
         usd_path=usd_path,
         initial_pose=Pose(position_xyz=tuple(pose.position_xyz), rotation_xyzw=tuple(pose.rotation_xyzw)),
-        physics=_remote_physics(cfg),
+        physics=remote_physics(cfg),
         actuators=_plunger_actuators(cfg),
-        initial_joint_pos={slot.name.replace("battery_", "slot_") + "_plunger": 0.0 for slot in active_slots(cfg)},
+        # Drive target 0 is the extended plunger; a seated cell compresses it to +preload.
+        initial_joint_pos={plunger_joint_name(slot): 0.0 for slot in active_slots(cfg)},
     )
 
 
-def make_battery(cfg: BatteryInsertionConfig, slot_name: str, usd_path: str) -> ConfiguredUsdObject:
-    pose = cfg.battery_a_pose if slot_name == "battery_a" else cfg.battery_b_pose
+def make_battery(cfg: BatteryInsertionConfig, cell_name: str, usd_path: str) -> ConfiguredUsdObject:
+    pose = battery_pose(cfg, cell_name)
     return ConfiguredUsdObject(
-        name=slot_name,
-        prim_path="{ENV_REGEX_NS}/" + slot_name,
+        name=cell_name,
+        prim_path="{ENV_REGEX_NS}/" + cell_name,
         object_type=ObjectType.RIGID,
         usd_path=usd_path,
         initial_pose=Pose(position_xyz=tuple(pose.position_xyz), rotation_xyzw=tuple(pose.rotation_xyzw)),
-        physics=_battery_physics(cfg),
+        physics=battery_physics(cfg),
     )
 
 

@@ -13,7 +13,7 @@ from isaaclab_arena_environments.example_environment_base import ExampleEnvironm
 from my_package.assets.geometry import write_geometry
 from my_package.assets.spawn import make_battery, make_marks, make_remote
 from my_package.embodiments.yam_bimanual import YamBimanualEmbodiment
-from my_package.scoring.config import active_slots, default_config_path, load_config, with_single_slot
+from my_package.scoring.config import cell_names, default_config_path, load_config, with_single_slot
 from my_package.scoring.runtime_state import set_active_config
 from my_package.tasks.battery_insertion_task import BatteryInsertionTask
 
@@ -37,7 +37,7 @@ class BatteryInsertionEnvironment(ExampleEnvironmentBase):
         light.set_intensity(cfg.light_intensity)
         directional_light = self.asset_registry.get_asset_by_name("directional_light")()
         remote = make_remote(cfg, str(paths["remote"]))
-        batteries = [make_battery(cfg, slot.name, str(paths["battery"])) for slot in active_slots(cfg)]
+        batteries = [make_battery(cfg, name, str(paths["battery"])) for name in cell_names(cfg)]
         marks = make_marks(str(paths["marks"]))
         # No On() relations. Marked poses are authoritative, so the launch also passes --no_solve_relations.
         embodiment = YamBimanualEmbodiment(

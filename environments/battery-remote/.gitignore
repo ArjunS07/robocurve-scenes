@@ -22,3 +22,6 @@ _build/
 omni_logs/
 kit_*/
 .nvidia-omniverse/
+
+# Per-run generated assets and runner outputs
+outputs/

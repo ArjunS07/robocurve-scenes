@@ -7,7 +7,7 @@ import torch
 from my_package.tasks.state_values import env_indices, quaternion_xyzw
 
 from my_package.scoring.action_map import arm_bindings
-from my_package.scoring.config import active_slots
+from my_package.scoring.config import active_slots, cell_names, plunger_joint_name
 from my_package.scoring.grasp import gripper_is_holding
 from my_package.scoring.math3d import norm, sub, yaw_error_deg
 from my_package.scoring.runtime_state import (
@@ -19,7 +19,7 @@ from my_package.scoring.runtime_state import (
     store,
 )
 from my_package.scoring.scorer import carry_episode_memory, step
-from my_package.scoring.snapshot import BatterySnapshot, SceneSnapshot
+from my_package.scoring.snapshot import BatterySnapshot, SceneSnapshot, SlotFit
 
 _WARNED: set[str] = set()
 
@@ -112,7 +112,7 @@ def _gripper_observation(env, env_index: int, cfg):
                 "battery insertion could not find gripper body "
                 f"{binding.gripper_body!r} or finger joints {binding.finger_joints} on {binding.asset_name}. "
                 f"Live bodies: {list(getattr(asset, 'body_names', []))}. "
-                "Holding is treated as false until the YAML names match the USDA.",
+                "Holding is UNKNOWN until the YAML names match the USDA, so no cell can earn release credit.",
             )
             continue
         origin = env.scene.env_origins[env_index]
@@ -147,36 +147,45 @@ def _read_env(env, env_index: int):
     displacement = norm(sub(remote_pos, cfg.remote_pose.position_xyz))
     yaw_error = yaw_error_deg(remote_quat, cfg.remote_pose.rotation_xyzw)
     gripper_positions, finger_positions = _gripper_observation(env, env_index, cfg)
+    slots = active_slots(cfg)
+    plungers = {slot.name: _plunger_position(env, env_index, plunger_joint_name(slot)) for slot in slots}
     batteries = []
-    for slot in active_slots(cfg):
-        asset = env.scene[slot.name]
+    for name in cell_names(cfg):
+        asset = env.scene[name]
         position = _as_tuple3(asset.data.root_pos_w[env_index] - origin)
         rotation = quaternion_xyzw(asset.data.root_quat_w[env_index])
-        joint_name = slot.name.replace("battery_", "slot_") + "_plunger"
-        measured = measure_battery(
-            cfg,
-            slot,
-            position,
-            rotation,
-            remote_pos,
-            remote_quat,
-            plunger_joint_m=_plunger_position(env, env_index, joint_name),
-        )
+        fits = []
+        for slot in slots:
+            measured = measure_battery(
+                cfg,
+                slot,
+                position,
+                rotation,
+                remote_pos,
+                remote_quat,
+                plunger_joint_m=plungers[slot.name],
+            )
+            fits.append(
+                SlotFit(
+                    slot=slot.name,
+                    axial_offset_m=measured.axial_offset_m,
+                    radial_offset_m=measured.radial_offset_m,
+                    polarity_aligned=measured.polarity_angle_deg <= cfg.scoring.polarity_angle_deg,
+                    spring_contact=measured.spring_contact,
+                )
+            )
         holding = gripper_is_holding(cfg, position, gripper_positions, finger_positions)
         batteries.append(
             BatterySnapshot(
-                name=slot.name,
+                name=name,
                 position_xyz=position,
                 rotation_xyzw=rotation,
                 positive_axis_xyz=rotate(rotation, (0.0, 0.0, 1.0)),
-                seating_depth_m=measured.seating_depth_m,
-                radial_offset_m=measured.radial_offset_m,
-                polarity_aligned=measured.polarity_angle_deg <= cfg.scoring.polarity_angle_deg,
+                fits=tuple(fits),
                 gripper_holding=holding,
-                released=not holding,
-                spring_contact=measured.spring_contact,
+                released=holding is False,
                 off_table=False,
-                peak_force_n=_peak_force(_sensor(env, f"contact_{slot.name}"), env_index),
+                peak_force_n=_peak_force(_sensor(env, f"contact_{name}"), env_index),
             )
         )
     observed = SceneSnapshot(

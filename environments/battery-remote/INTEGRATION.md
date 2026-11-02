@@ -48,26 +48,37 @@ Cameras, still without a viewport recording:
 /home/ubuntu/workspace/IsaacLab-Arena/.venv/bin/python launch_battery_insertion.py --enable-cameras
 ```
 
-The script puts this directory and `/home/ubuntu/workspace/IsaacLab-Arena` on `sys.path`, imports `torch`, then runs `isaaclab_arena/evaluation/policy_runner.py` with:
+Streaming preview (one streaming environment at a time on these ports). Connect the Isaac Sim WebRTC client to `global.prd.ga.run.brev.nvidia.com`, signal port 24317, stream port 28337:
+
+```bash
+PUBLIC_IP=160.211.46.91 /home/ubuntu/workspace/IsaacLab-Arena/.venv/bin/python launch_battery_insertion.py --stream
+```
+
+The script puts this directory and the Arena root (`--arena-root`, default `/home/ubuntu/workspace/IsaacLab-Arena`) on `sys.path`, imports `torch` before Kit, then runs `isaaclab_arena/evaluation/policy_runner.py`. Runner flags come before the `battery_insertion` subcommand, and environment flags come after it:
 
 ```text
---visualizer none
+--visualizer none            (kit with --stream)
 --device cuda:0
 --num_envs 1
 --policy_type zero_action
---num_steps 50
+--num_steps 50               (1000000 with --stream)
+--output_base_dir <this dir>/outputs
 --no_solve_relations
 --external_environment_class_path my_package.isaaclab_arena_environments.battery_environment:BatteryInsertionEnvironment
+[--livestream 1]             (with --stream)
+[--enable_cameras]
 battery_insertion
+[--single_slot]
 ```
 
-`--single_slot` is appended for `--single-slot`. `--enable_cameras` is appended for `--enable-cameras`. The script does not pass a headless flag and does not pass `--record_viewport_video`.
+The script does not pass a headless flag and does not pass `--record_viewport_video`. `--output_base_dir`, `--visualizer kit`, and `--livestream 1` have not been run yet. If the runner rejects one of them, remove it from `build_argv`.
 
-Launch rewrites `my_package/assets/generated/` from the YAML before the scene is built. `--no_solve_relations` keeps the marked poses from being moved by Arena's `On()` solver. This scene does not add `On()` relations.
+Launch writes the scene assets from the YAML into a new `outputs/assets-*` directory before the scene is built. It does not touch the tracked examples. `--no_solve_relations` keeps the marked poses from being moved by Arena's `On()` solver. This scene does not add `On()` relations.
 
 ## If startup fails
 
 - Contact-sensor prims abort the app: set `scoring.enable_contact_sensors: false` in `my_package/config/battery_insertion.yaml`. The damage proxy then stays at 0.
 - The action term prints the live joint list: set `robot.arm_layout` to `duplicated_single_arm` (USDA spawned twice, joints `joint1`..`joint8` on each) or `combined` (one articulation, `left_joint*` / `right_joint*`). Those prefixed names are the station URDF, not something confirmed on the USDA.
 - Finger direction is backwards: the source URDF opens toward negative joint values (`finger_open_m: -0.04695`, `finger_closed_m: 0`). The station URDF uses the positive range. Change both numbers together. The USDA file is not edited.
-- `UsdFileCfg` rejects `rigid_props`, `collision_props`, `mass_props`, or `physics_material`: those fields are copied from Arena's procedural cuboid spawner. The 0.3.1 tag only passes `usd_path`, `scale`, and `activate_contact_sensors` into `UsdFileCfg`. Drop the rejected fields in `my_package/assets/spawn.py` if this Isaac Lab build does not accept them.
+- `UsdFileCfg` rejects `rigid_props`, `collision_props`, `mass_props`, or `articulation_props`: drop the rejected field in `my_package/assets/spawn.py`. If `articulation_props` / `fix_root_link` is rejected, the remote is no longer secured; report it rather than silently continuing. Friction is authored as USD physics materials, so `physics_material` is not passed.
+- Generated assets go to a fresh `outputs/assets-*` directory per launch (`ROBOCURVE_GENERATED_DIR`). The tracked files in `my_package/assets/generated/` are examples, kept identical to the generator by a test.

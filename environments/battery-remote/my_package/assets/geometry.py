@@ -1,14 +1,16 @@
 """Procedural remote, battery, and table-mark geometry. No Isaac Sim imports.
 
-The compartment is a C-channel. A plain cylinder can rest on the floor without
-starting inside a wall, and the side lips leave a top opening narrower than the
-cell so it cannot lift out. The mouth, past ``lip_end_x``, is the full channel
-cross-section so the cell enters along the slot. A prismatic plunger at the
-mouth pushes a seated cell against the back stop. Nothing welds the cell to
-the remote and nothing teleports it into the slot.
+The battery cover is removed, so the bay is open from above. Each slot is an
+open-top trough: floor, side walls, a fixed contact at the cell's positive end,
+and a spring plunger at its negative end. A cell is inserted from above by
+pressing its negative end into the plunger, then lowering the positive end
+onto the floor. The plunger is a prismatic joint whose drive pushes the seated
+cell against the fixed contact. Nothing welds the cell to the remote and nothing
+teleports it into the slot. Retention after release comes from gravity, the
+walls, and the spring preload.
 
 The red nub is visual only. Collision is the cylinder body, so the nub does
-not fight the plunger or the back wall. Polarity is the cylinder axis.
+not fight the plunger or the fixed contact. Polarity is the cylinder axis.
 """
 
 from __future__ import annotations
@@ -17,7 +19,15 @@ import math
 from dataclasses import dataclass
 from pathlib import Path
 
-from my_package.scoring.config import BatteryInsertionConfig, SlotSpec, active_slots
+from my_package.scoring.config import (
+    BatteryInsertionConfig,
+    SlotSpec,
+    active_slots,
+    battery_pose,
+    cell_names,
+    plunger_joint_name,
+    plunger_link_name,
+)
 from my_package.scoring.math3d import add, clamp, norm, normalize, scale, sub
 
 
@@ -32,7 +42,9 @@ class Box:
 
 @dataclass(frozen=True)
 class BatteryMeasure:
-    seating_depth_m: float
+    """One cell measured against one slot."""
+
+    axial_offset_m: float
     radial_offset_m: float
     positive_axis_xyz: tuple[float, float, float]
     polarity_angle_deg: float
@@ -58,83 +70,99 @@ def slot_y_bounds(slot: SlotSpec, channel_y_half: float) -> tuple[float, float]:
     return slot.center_y_m - channel_y_half, slot.center_y_m + channel_y_half
 
 
+def spring_side(slot: SlotSpec) -> float:
+    """+1 when the spring is at the slot's +X end. The spring sits at the negative terminal."""
+    return -math.copysign(1.0, slot.required_axis_xyz[0])
+
+
 def rest_center_z(cfg: BatteryInsertionConfig) -> float:
-    """Center height of a cell sitting on the channel floor."""
-    return -cfg.compartment.channel_z_half + cfg.battery.diameter_m / 2.0
+    """Center height of a cell sitting on the slot floor."""
+    return cfg.compartment.floor_z_m + cfg.battery.diameter_m / 2.0
+
+
+def bay_half_length(cfg: BatteryInsertionConfig) -> float:
+    """Half the bay length: seated cell, preload, plunger, travel, and end gap."""
+    compartment = cfg.compartment
+    return (
+        cfg.battery.length_m / 2.0
+        - compartment.spring_preload_m
+        + compartment.plunger_size_xyz[0]
+        + compartment.plunger_travel_m
+        + compartment.plunger_end_gap_m
+    )
+
+
+def bay_x_bounds(cfg: BatteryInsertionConfig) -> tuple[float, float]:
+    half = bay_half_length(cfg)
+    return cfg.compartment.seat_center_x - half, cfg.compartment.seat_center_x + half
+
+
+def fixed_contact_x(cfg: BatteryInsertionConfig, slot: SlotSpec) -> float:
+    """Face of the fixed contact. A seated cell's positive end touches it."""
+    return cfg.compartment.seat_center_x - spring_side(slot) * cfg.battery.length_m / 2.0
 
 
 def static_boxes(cfg: BatteryInsertionConfig) -> tuple[Box, ...]:
+    """Chassis colliders. There is no ceiling: the cover is off."""
     compartment = cfg.compartment
     outer_y = compartment.size_xyz[1] / 2.0
     outer_z = compartment.size_xyz[2] / 2.0
     x_rear = compartment.rear_face_x
-    x_back = compartment.back_face_x
     x_front = compartment.front_face_x
-    z_channel = compartment.channel_z_half
+    bay_min, bay_max = bay_x_bounds(cfg)
+    floor_z = compartment.floor_z_m
     slots = active_slots(cfg)
     body = (0.06, 0.06, 0.07)
-    lip_color = (0.14, 0.14, 0.15)
+    contact_color = (0.62, 0.62, 0.58)
     nose = compartment.front_face_x - compartment.silhouette_length_m
     boxes: list[Box] = [
         _box("nose", (nose, x_rear, -outer_y, outer_y, -outer_z, outer_z), body),
-        _box("back_cap", (x_rear, x_back, -outer_y, outer_y, -outer_z, outer_z), body),
-        _box("floor", (x_back, x_front, -outer_y, outer_y, -outer_z, -z_channel), body),
-        _box("ceiling", (x_back, x_front, -outer_y, outer_y, z_channel, outer_z), body),
+        _box("back_cap", (x_rear, bay_min, -outer_y, outer_y, -outer_z, outer_z), body),
+        _box("front_cap", (bay_max, x_front, -outer_y, outer_y, -outer_z, outer_z), body),
+        _box("floor", (bay_min, bay_max, -outer_y, outer_y, -outer_z, floor_z), body),
     ]
     first_min, first_max = slot_y_bounds(slots[0], compartment.channel_y_half)
-    boxes.append(_box("rail_left", (x_back, x_front, -outer_y, first_min, -z_channel, z_channel), body))
+    boxes.append(_box("rail_left", (bay_min, bay_max, -outer_y, first_min, floor_z, outer_z), body))
     if len(slots) == 1:
-        boxes.append(_box("rail_right", (x_back, x_front, first_max, outer_y, -z_channel, z_channel), body))
+        boxes.append(_box("rail_right", (bay_min, bay_max, first_max, outer_y, floor_z, outer_z), body))
     else:
         second_min, second_max = slot_y_bounds(slots[1], compartment.channel_y_half)
-        boxes.append(_box("spine", (x_back, x_front, first_max, second_min, -z_channel, z_channel), body))
-        boxes.append(_box("rail_right", (x_back, x_front, second_max, outer_y, -z_channel, z_channel), body))
-    intrusion = compartment.lip_side_intrusion
+        boxes.append(_box("spine", (bay_min, bay_max, first_max, second_min, floor_z, outer_z), body))
+        boxes.append(_box("rail_right", (bay_min, bay_max, second_max, outer_y, floor_z, outer_z), body))
     for slot in slots:
         ymin, ymax = slot_y_bounds(slot, compartment.channel_y_half)
-        boxes.append(
-            _box(
-                f"{slot.name}_lip_left",
-                (x_back, compartment.lip_end_x, ymin, ymin + intrusion, compartment.lip_z_bottom, z_channel),
-                lip_color,
-            )
-        )
-        boxes.append(
-            _box(
-                f"{slot.name}_lip_right",
-                (x_back, compartment.lip_end_x, ymax - intrusion, ymax, compartment.lip_z_bottom, z_channel),
-                lip_color,
-            )
-        )
+        face = fixed_contact_x(cfg, slot)
+        if spring_side(slot) > 0.0:
+            bounds = (bay_min, face, ymin, ymax, floor_z, outer_z)
+        else:
+            bounds = (face, bay_max, ymin, ymax, floor_z, outer_z)
+        boxes.append(_box(f"{slot.name}_fixed_contact", bounds, contact_color))
     return tuple(boxes)
 
 
 def polarity_marks(cfg: BatteryInsertionConfig) -> tuple[Box, ...]:
-    """Visual marks on the top face. They have no collision."""
+    """Visual marks on the rim. Red over the fixed (+) contact, black past the spring (-)."""
     compartment = cfg.compartment
     outer_z = compartment.size_xyz[2] / 2.0
     mark_z = outer_z + 0.0004
+    bay_min, bay_max = bay_x_bounds(cfg)
     marks: list[Box] = []
     for slot in active_slots(cfg):
-        axis = slot.required_axis_xyz[0]
-        positive_x = compartment.seat_center_x + math.copysign(0.012, axis)
-        negative_x = compartment.seat_center_x - math.copysign(0.012, axis)
-        marks.append(
-            _box(
-                f"{slot.name}_positive_mark",
-                (positive_x - 0.003, positive_x + 0.003, slot.center_y_m - 0.003, slot.center_y_m + 0.003, mark_z, mark_z + 0.0004),
-                (0.75, 0.08, 0.08),
-                collision=False,
+        side = spring_side(slot)
+        face = fixed_contact_x(cfg, slot)
+        bay_end_fixed = bay_min if side > 0.0 else bay_max
+        bay_end_spring = bay_max if side > 0.0 else bay_min
+        positive_x = 0.5 * (face + bay_end_fixed)
+        negative_x = bay_end_spring + side * 0.004
+        for tag, x, color in (("positive", positive_x, (0.75, 0.08, 0.08)), ("negative", negative_x, (0.08, 0.08, 0.08))):
+            marks.append(
+                _box(
+                    f"{slot.name}_{tag}_mark",
+                    (x - 0.003, x + 0.003, slot.center_y_m - 0.003, slot.center_y_m + 0.003, mark_z, mark_z + 0.0004),
+                    color,
+                    collision=False,
+                )
             )
-        )
-        marks.append(
-            _box(
-                f"{slot.name}_negative_mark",
-                (negative_x - 0.003, negative_x + 0.003, slot.center_y_m - 0.003, slot.center_y_m + 0.003, mark_z, mark_z + 0.0004),
-                (0.08, 0.08, 0.08),
-                collision=False,
-            )
-        )
     return tuple(marks)
 
 
@@ -177,17 +205,15 @@ def likeness_marks(cfg: BatteryInsertionConfig) -> tuple[Box, ...]:
 
 
 def plunger_box(cfg: BatteryInsertionConfig, slot: SlotSpec, joint_pos_m: float = 0.0) -> Box:
-    """Plunger at a prismatic joint position. Zero is the authored extended pose."""
+    """Plunger pad at a prismatic joint position. Zero is extended; positive compresses it."""
     compartment = cfg.compartment
     size = compartment.plunger_size_xyz
-    center = (
-        compartment.plunger_center_x + joint_pos_m,
-        slot.center_y_m,
-        0.0,
-    )
+    side = spring_side(slot)
+    face = compartment.seat_center_x + side * (cfg.battery.length_m / 2.0 - compartment.spring_preload_m)
+    center_x = face + side * (size[0] / 2.0 + joint_pos_m)
     return Box(
         name=f"{slot.name}_plunger",
-        center=center,
+        center=(center_x, slot.center_y_m, rest_center_z(cfg)),
         size=size,
         collision=True,
         color=(0.55, 0.57, 0.6),
@@ -318,15 +344,15 @@ def measure_battery(
     remote_rotation_xyzw: tuple[float, float, float, float],
     plunger_joint_m: float = 0.0,
 ) -> BatteryMeasure:
-    """Measure one cell against one slot. Depth is along the channel, not an AABB test."""
+    """Measure one cell against one slot along the slot axis, not with an AABB test."""
     from my_package.scoring.math3d import angle_deg, rotate
 
     local = _world_point_to_remote(remote_position_xyz, remote_rotation_xyzw, battery_position_xyz)
     positive_world = rotate(battery_rotation_xyzw, (0.0, 0.0, 1.0))
     positive_local = _world_axis_to_remote(remote_rotation_xyzw, positive_world)
     required_world = rotate(remote_rotation_xyzw, slot.required_axis_xyz)
-    depth = cfg.compartment.mouth_x - local[0]
-    radial = math.hypot(local[1] - slot.center_y_m, local[2])
+    axial = local[0] - cfg.compartment.seat_center_x
+    radial = math.hypot(local[1] - slot.center_y_m, local[2] - rest_center_z(cfg))
     plunger = plunger_box(cfg, slot, plunger_joint_m)
     contact = spring_contacts_plunger(
         local,
@@ -337,7 +363,7 @@ def measure_battery(
         cfg.compartment.spring_contact_distance_m,
     )
     return BatteryMeasure(
-        seating_depth_m=depth,
+        axial_offset_m=axial,
         radial_offset_m=radial,
         positive_axis_xyz=positive_world,
         polarity_angle_deg=angle_deg(positive_world, required_world),
@@ -350,6 +376,13 @@ def _seated_center(cfg: BatteryInsertionConfig, slot: SlotSpec) -> tuple[float, 
     return (cfg.compartment.seat_center_x, slot.center_y_m, rest_center_z(cfg))
 
 
+def _drop_center_x(cfg: BatteryInsertionConfig, slot: SlotSpec) -> float:
+    """Middle of the free length when the plunger is fully compressed."""
+    compartment = cfg.compartment
+    slack = compartment.plunger_travel_m - compartment.spring_preload_m
+    return compartment.seat_center_x + spring_side(slot) * slack / 2.0
+
+
 def design_report(cfg: BatteryInsertionConfig) -> dict:
     """Check the provisional clearances. ``ok`` is false when a number contradicts another."""
     problems: list[str] = []
@@ -357,17 +390,21 @@ def design_report(cfg: BatteryInsertionConfig) -> dict:
     diameter = cfg.battery.diameter_m
     radius = diameter / 2.0
     half_length = cfg.battery.length_m / 2.0
+    outer_z = compartment.size_xyz[2] / 2.0
     channel_width = 2.0 * compartment.channel_y_half
-    top_opening = channel_width - 2.0 * compartment.lip_side_intrusion
-    full_depth = compartment.mouth_x - compartment.seat_center_x
+    bay_min, bay_max = bay_x_bounds(cfg)
     if channel_width <= diameter:
         problems.append(f"channel width {channel_width} is not larger than the cell diameter {diameter}")
-    if top_opening >= diameter:
-        problems.append(f"top opening {top_opening} must be narrower than the cell diameter {diameter}")
-    if compartment.lip_z_bottom >= compartment.channel_z_half:
-        problems.append("lip_z_bottom must sit below the channel ceiling")
-    if not (compartment.rear_face_x < compartment.back_face_x < compartment.seat_center_x < compartment.lip_end_x < compartment.mouth_x <= compartment.front_face_x):
-        problems.append("remote x stations are not in rear < back < seat < lip_end < mouth <= front order")
+    if not (compartment.rear_face_x < bay_min < compartment.seat_center_x < bay_max < compartment.front_face_x):
+        problems.append("remote x stations are not in rear < bay start < seat < bay end < front order")
+    if not -outer_z < compartment.floor_z_m < outer_z:
+        problems.append("floor_z_m must sit inside the shell height")
+    seated_top = rest_center_z(cfg) + radius
+    if seated_top > outer_z:
+        problems.append(f"a seated cell top ({seated_top:.4f}) sticks out above the rim ({outer_z:.4f})")
+    wall_height = outer_z - compartment.floor_z_m
+    if wall_height < 0.5 * diameter:
+        problems.append("slot walls are lower than the cell axis, so a seated cell is not retained laterally")
     outer_x = compartment.front_face_x - compartment.rear_face_x
     nose = compartment.front_face_x - compartment.silhouette_length_m
     if abs(outer_x - compartment.size_xyz[0]) > 1e-9:
@@ -375,18 +412,24 @@ def design_report(cfg: BatteryInsertionConfig) -> dict:
     if compartment.silhouette_length_m <= outer_x:
         problems.append("silhouette_length_m must be longer than the battery bay")
     if not nose < compartment.rear_face_x:
-        problems.append("the nose must sit entirely past the back of the bay so the mouth stays open")
+        problems.append("the nose must sit entirely past the rear face")
     if abs(compartment.size_xyz[1] / 2.0 - 0.025) > 1e-9 or abs(compartment.size_xyz[2] / 2.0 - 0.011) > 1e-9:
         problems.append("this shell builder expects the provisional 0.050 by 0.022 remote cross-section")
-    back_gap = (compartment.seat_center_x - half_length) - compartment.back_face_x
-    if back_gap < 0.0008:
-        problems.append(f"seated body is only {back_gap} m from the back stop; need at least 0.0008 m")
+    if not 0.0 < compartment.spring_preload_m < compartment.plunger_travel_m:
+        problems.append("spring_preload_m must be positive and smaller than plunger_travel_m")
+    plunger_z = compartment.plunger_size_xyz[2] / 2.0
+    if rest_center_z(cfg) - plunger_z <= compartment.floor_z_m:
+        problems.append("the plunger pad reaches the slot floor")
+    if compartment.plunger_size_xyz[1] >= channel_width:
+        problems.append("the plunger pad is not narrower than the slot")
+    drop_slack = compartment.plunger_travel_m - compartment.spring_preload_m
     numbers = {
         "channel_width_m": channel_width,
         "lateral_clearance_m": (channel_width - diameter) / 2.0,
-        "top_opening_m": top_opening,
-        "full_seat_depth_m": full_depth,
-        "back_gap_m": back_gap,
+        "seated_rim_margin_m": outer_z - seated_top,
+        "bay_length_m": bay_max - bay_min,
+        "drop_slack_m": drop_slack,
+        "spring_preload_m": compartment.spring_preload_m,
         "rest_center_z_m": rest_center_z(cfg),
         "contact_offset_m": compartment.contact_offset_m,
         "silhouette_length_m": compartment.silhouette_length_m,
@@ -394,55 +437,61 @@ def design_report(cfg: BatteryInsertionConfig) -> dict:
     }
     if compartment.contact_offset_m >= numbers["lateral_clearance_m"]:
         problems.append("contact_offset_m is larger than the lateral clearance and would glue the cell")
+    if drop_slack <= 2.0 * compartment.contact_offset_m:
+        problems.append("a fully compressed plunger leaves no room to lower the cell straight down")
 
     boxes = [box for box in static_boxes(cfg) if box.collision]
+    travel = compartment.plunger_travel_m
     for slot in active_slots(cfg):
+        touch_ok = {"floor", f"{slot.name}_fixed_contact"}
         center = _seated_center(cfg, slot)
-        floor_gaps = []
-        other_gaps = []
         for box in boxes:
-            gap = cylinder_aabb_gap(center, radius, half_length, *_aabb(box))
-            if box.name == "floor":
-                floor_gaps.append(gap)
-            else:
-                other_gaps.append((box.name, gap))
-        if not floor_gaps or min(floor_gaps) < -1e-4:
-            problems.append(f"{slot.name} seated cell penetrates the floor")
-        for name, gap in other_gaps:
-            if gap < 0.0002:
-                problems.append(f"{slot.name} seated cell clearance to {name} is {gap:.6f} m")
-        raised = (center[0], center[1], center[2] + 0.003)
-        raised_gaps = [cylinder_aabb_gap(raised, radius, half_length, *_aabb(box)) for box in boxes]
-        if min(raised_gaps) >= 0.0:
-            problems.append(f"{slot.name} still clears every wall after a 3 mm lift, so the lips do not retain it")
-        plunger = plunger_box(cfg, slot, 0.0)
-        for box in boxes:
-            gap = aabb_gap(*_aabb(plunger), *_aabb(box))
-            if gap < 0.0005:
-                problems.append(f"{slot.name} plunger clearance to {box.name} is {gap:.6f} m")
-        seated_end = (center[0] + half_length, center[1], center[2])
-        if point_aabb_distance(seated_end, *_aabb(plunger)) > 0.0:
-            problems.append(f"{slot.name} seated positive end is not inside the extended plunger")
-        travel = compartment.plunger_travel_m
-        overlap = (center[0] + half_length) - (_aabb(plunger)[0][0])
-        if overlap <= 0.0 or overlap >= travel:
-            problems.append(
-                f"{slot.name} plunger overlap {overlap:.6f} m is not inside the {travel} m travel"
-            )
-        start_x = compartment.front_face_x + half_length + 0.004
+            # A flat cap flush against the fixed contact reads as full overlap, so shave 10 um.
+            gap = cylinder_aabb_gap(center, radius, half_length - 1e-5, *_aabb(box))
+            if box.name in touch_ok:
+                if gap < -1e-4:
+                    problems.append(f"{slot.name} seated cell penetrates {box.name} ({gap:.6f} m)")
+            elif gap < 0.0002:
+                problems.append(f"{slot.name} seated cell clearance to {box.name} is {gap:.6f} m")
+        extended = plunger_box(cfg, slot, 0.0)
+        compressed = plunger_box(cfg, slot, travel)
+        for label, plunger in (("extended", extended), ("compressed", compressed)):
+            for box in boxes:
+                gap = aabb_gap(*_aabb(plunger), *_aabb(box))
+                if gap < 0.0005:
+                    problems.append(f"{slot.name} {label} plunger clearance to {box.name} is {gap:.6f} m")
+        # Seated, the cell compresses the plunger by the preload and no more than the travel.
+        side = spring_side(slot)
+        seated_end = center[0] + side * half_length
+        extended_face = extended.center[0] - side * extended.size[0] / 2.0
+        overlap = side * (seated_end - extended_face)
+        if not 0.0 < overlap < travel:
+            problems.append(f"{slot.name} seated preload {overlap:.6f} m is not inside the {travel} m travel")
+        # Vertical drop from above the rim with the plunger fully compressed.
+        drop_x = _drop_center_x(cfg, slot)
+        top_z = outer_z + radius + 0.004
         samples = 16
         for index in range(samples + 1):
-            x = start_x + (center[0] - start_x) * index / samples
-            sample = (x, slot.center_y_m, rest_center_z(cfg))
-            for box in boxes:
+            z = top_z + (rest_center_z(cfg) - top_z) * index / samples
+            sample = (drop_x, slot.center_y_m, z)
+            hit = None
+            for box in (*boxes, compressed):
                 gap = cylinder_aabb_gap(sample, radius, half_length, *_aabb(box))
                 if box.name == "floor":
                     if gap < -1e-4:
-                        problems.append(f"{slot.name} insertion path penetrates the floor at x={x:.4f}")
-                        break
+                        hit = (box.name, gap)
                 elif gap < 0.0002:
-                    problems.append(f"{slot.name} insertion path hits {box.name} at x={x:.4f} (gap {gap:.6f})")
+                    hit = (box.name, gap)
+                if hit:
+                    problems.append(f"{slot.name} insertion drop hits {hit[0]} at z={z:.4f} (gap {hit[1]:.6f})")
                     break
+            if hit:
+                break
+        # With the plunger extended the same drop must hit it: the spring has to be pressed.
+        seated_drop = (drop_x, slot.center_y_m, rest_center_z(cfg))
+        numbers[f"{slot.name}_extended_plunger_blocks_drop"] = (
+            cylinder_aabb_gap(seated_drop, radius, half_length, *_aabb(extended)) < 0.0
+        )
     # A cell between the slots is inside the remote's outer box but not on a plunger.
     if len(active_slots(cfg)) == 2:
         between = measure_battery(
@@ -455,8 +504,8 @@ def design_report(cfg: BatteryInsertionConfig) -> dict:
         )
         if between.spring_contact:
             problems.append("a cell at the remote origin touches a plunger; the slot test is too broad")
-        if between.seating_depth_m >= full_depth - cfg.scoring.axial_tolerance_m:
-            problems.append("a cell at the remote origin already counts as fully deep")
+        if between.radial_offset_m <= cfg.scoring.seat_radial_max_m:
+            problems.append("a cell at the remote origin already counts as on a slot axis")
     return {"ok": not problems, "problems": problems, "numbers": numbers}
 
 
@@ -464,13 +513,13 @@ def _fmt(value: float) -> str:
     return f"{value:.8f}".rstrip("0").rstrip(".")
 
 
-def _cube(box: Box, collision: bool) -> str:
+def _cube(box: Box, collision: bool, contact_offset_m: float = 0.0003) -> str:
     schemas = 'prepend apiSchemas = ["PhysicsCollisionAPI"]' if collision else ""
     header = f"    def Cube \"{box.name}\" (\n        {schemas}\n    )" if collision else f"    def Cube \"{box.name}\""
     color = ", ".join(_fmt(channel) for channel in box.color)
     contact = ""
     if collision:
-        contact = f"\n        float physxCollision:contactOffset = {_fmt(0.0003)}"
+        contact = f"\n        float physxCollision:contactOffset = {_fmt(contact_offset_m)}"
     return f"""{header}
     {{
         double size = 1
@@ -478,6 +527,17 @@ def _cube(box: Box, collision: bool) -> str:
         float3 xformOp:scale = ({_fmt(box.size[0])}, {_fmt(box.size[1])}, {_fmt(box.size[2])})
         uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:scale"]
         color3f[] primvars:displayColor = [({color})]{contact}
+    }}"""
+
+
+def _physics_material(name: str, static: float, dynamic: float, restitution: float) -> str:
+    return f"""    def Material "{name}" (
+        prepend apiSchemas = ["PhysicsMaterialAPI"]
+    )
+    {{
+        float physics:staticFriction = {_fmt(static)}
+        float physics:dynamicFriction = {_fmt(dynamic)}
+        float physics:restitution = {_fmt(restitution)}
     }}"""
 
 
@@ -497,26 +557,32 @@ def write_geometry(cfg: BatteryInsertionConfig, directory: str | Path) -> dict[s
     return {"remote": remote_path, "battery": battery_path, "marks": marks_path}
 
 
-def _remote_usda(cfg: BatteryInsertionConfig, numbers: dict[str, float]) -> str:
+def _remote_usda(cfg: BatteryInsertionConfig, numbers: dict) -> str:
     compartment = cfg.compartment
+    offset = compartment.contact_offset_m
     cubes = "\n".join(
-        _cube(box, box.collision) for box in (*static_boxes(cfg), *polarity_marks(cfg), *likeness_marks(cfg))
+        _cube(box, box.collision, offset)
+        for box in (*static_boxes(cfg), *polarity_marks(cfg), *likeness_marks(cfg))
     )
     plunger_blocks = []
     joint_blocks = []
     for slot in active_slots(cfg):
         plunger = plunger_box(cfg, slot, 0.0)
-        link = slot.name.replace("battery_", "slot_") + "_plunger_link"
-        joint = slot.name.replace("battery_", "slot_") + "_plunger"
+        link = plunger_link_name(slot)
+        joint = plunger_joint_name(slot)
+        # Rotate the joint frame so +joint always compresses the spring, on either end of the bay.
+        rot = "(1, 0, 0, 0)" if spring_side(slot) > 0.0 else "(0, 0, 0, 1)"
+        pad = _cube(Box(joint + "_pad", (0.0, 0.0, 0.0), plunger.size, True, plunger.color), True, offset)
         plunger_blocks.append(
             f"""    def Xform "{link}" (
-        prepend apiSchemas = ["PhysicsRigidBodyAPI", "PhysicsMassAPI"]
+        prepend apiSchemas = ["PhysicsRigidBodyAPI", "PhysicsMassAPI", "MaterialBindingAPI"]
     )
     {{
         float physics:mass = {_fmt(compartment.plunger_mass_kg)}
+        rel material:binding:physics = </remote/physics_material>
         double3 xformOp:translate = ({_fmt(plunger.center[0])}, {_fmt(plunger.center[1])}, {_fmt(plunger.center[2])})
         uniform token[] xformOpOrder = ["xformOp:translate"]
-{_cube(Box(joint + "_pad", (0.0, 0.0, 0.0), plunger.size, True, plunger.color), True).replace("    def", "        def")}
+{pad.replace("    def", "        def")}
     }}"""
         )
         joint_blocks.append(
@@ -529,8 +595,8 @@ def _remote_usda(cfg: BatteryInsertionConfig, numbers: dict[str, float]) -> str:
         float physics:upperLimit = {_fmt(compartment.plunger_travel_m)}
         point3f physics:localPos0 = ({_fmt(plunger.center[0])}, {_fmt(plunger.center[1])}, {_fmt(plunger.center[2])})
         point3f physics:localPos1 = (0, 0, 0)
-        quatf physics:localRot0 = (1, 0, 0, 0)
-        quatf physics:localRot1 = (1, 0, 0, 0)
+        quatf physics:localRot0 = {rot}
+        quatf physics:localRot1 = {rot}
         bool physics:jointEnabled = true
     }}"""
         )
@@ -539,16 +605,21 @@ def _remote_usda(cfg: BatteryInsertionConfig, numbers: dict[str, float]) -> str:
             "# Provisional procedural TV-remote compartment. Not measured CAD.",
             f"# channel_width_m = {numbers['channel_width_m']}",
             f"# lateral_clearance_m = {numbers['lateral_clearance_m']}",
-            f"# top_opening_m = {numbers['top_opening_m']}",
-            f"# full_seat_depth_m = {numbers['full_seat_depth_m']}",
-            f"# back_gap_m = {numbers['back_gap_m']}",
+            f"# seated_rim_margin_m = {numbers['seated_rim_margin_m']}",
+            f"# bay_length_m = {numbers['bay_length_m']}",
+            f"# drop_slack_m = {numbers['drop_slack_m']}",
+            f"# spring_preload_m = {numbers['spring_preload_m']}",
             f"# contact_offset_m = {numbers['contact_offset_m']}",
             f"# plunger_travel_m = {compartment.plunger_travel_m}",
             f"# silhouette_length_m = {numbers['silhouette_length_m']}",
-            "# Likeness of a black two-AAA TV remote. The nose is solid. The mouth at +X stays open.",
-            "# The plunger is a prismatic joint. There is no fixed joint and the battery is not parented here.",
+            "# Cover removed: the bay is open from above. The spring is at each slot's negative end.",
+            "# Plungers are prismatic joints; +joint compresses the spring. The battery is not parented here.",
+            "# The remote is fixed to the world by the spawner (fix_root_link), not by a joint in this file.",
             "# single_slot omits slot_b. Joint 0 is the extended pose authored below.",
         ]
+    )
+    material = _physics_material(
+        "physics_material", compartment.static_friction, compartment.dynamic_friction, compartment.restitution
     )
     return f"""#usda 1.0
 (
@@ -564,14 +635,13 @@ def Xform "remote" (
     prepend apiSchemas = ["PhysicsArticulationRootAPI"]
 )
 {{
+{material}
     def Xform "chassis" (
-        prepend apiSchemas = ["PhysicsRigidBodyAPI", "PhysicsMassAPI", "PhysxRigidBodyAPI"]
+        prepend apiSchemas = ["PhysicsRigidBodyAPI", "PhysicsMassAPI", "PhysxRigidBodyAPI", "MaterialBindingAPI"]
     )
     {{
         float physics:mass = {_fmt(compartment.mass_kg)}
-        float physics:staticFriction = {_fmt(compartment.static_friction)}
-        float physics:dynamicFriction = {_fmt(compartment.dynamic_friction)}
-        float physics:restitution = {_fmt(compartment.restitution)}
+        rel material:binding:physics = </remote/physics_material>
         int physxRigidBody:solverPositionIterationCount = {compartment.solver_position_iterations}
         int physxRigidBody:solverVelocityIterationCount = {compartment.solver_velocity_iterations}
         quatf xformOp:orient = (1, 0, 0, 0)
@@ -590,6 +660,9 @@ def _battery_usda(cfg: BatteryInsertionConfig) -> str:
     radius = battery.diameter_m / 2.0
     # Local +Z is the positive terminal. The nub is visual and has no collision.
     nub_center = battery.length_m / 2.0 + battery.nub_length_m / 2.0
+    material = _physics_material(
+        "physics_material", battery.static_friction, battery.dynamic_friction, battery.restitution
+    )
     return f"""#usda 1.0
 (
     defaultPrim = "battery"
@@ -600,13 +673,12 @@ def _battery_usda(cfg: BatteryInsertionConfig) -> str:
 )
 
 def Xform "battery" (
-    prepend apiSchemas = ["PhysicsRigidBodyAPI", "PhysicsMassAPI", "PhysxRigidBodyAPI"]
+    prepend apiSchemas = ["PhysicsRigidBodyAPI", "PhysicsMassAPI", "PhysxRigidBodyAPI", "MaterialBindingAPI"]
 )
 {{
     float physics:mass = {_fmt(battery.mass_kg)}
-    float physics:staticFriction = {_fmt(battery.static_friction)}
-    float physics:dynamicFriction = {_fmt(battery.dynamic_friction)}
-    float physics:restitution = {_fmt(battery.restitution)}
+    rel material:binding:physics = </battery/physics_material>
+{material}
     def Cylinder "body" (
         prepend apiSchemas = ["PhysicsCollisionAPI"]
     )
@@ -645,11 +717,11 @@ def _marks_usda(cfg: BatteryInsertionConfig) -> str:
             (0.1, 0.45, 0.2),
         )
     ]
-    for slot in active_slots(cfg):
-        pose = cfg.battery_a_pose if slot.name == "battery_a" else cfg.battery_b_pose
+    for name in cell_names(cfg):
+        pose = battery_pose(cfg, name)
         marks.append(
             Box(
-                f"{slot.name}_mark",
+                f"{name}_mark",
                 (pose.position_xyz[0], pose.position_xyz[1], top),
                 (cfg.battery.length_m + 0.006, cfg.battery.diameter_m + 0.006, 0.0004),
                 False,
@@ -670,4 +742,3 @@ def Xform "marks"
 {cubes}
 }}
 """
-

@@ -31,7 +31,7 @@ class BatteryGeometry:
 
 @dataclass(frozen=True)
 class SlotSpec:
-    """One compartment slot. ``name`` is the battery this slot is scored against."""
+    """One open-top compartment slot. Either physical cell may be scored in it."""
 
     name: str
     center_y_m: float
@@ -40,7 +40,13 @@ class SlotSpec:
 
 @dataclass(frozen=True)
 class CompartmentGeometry:
-    """Remote body and the retention channel. Numbers are provisional."""
+    """Remote body and the open battery bay. Numbers are provisional.
+
+    The cover is off, so each slot is open from above. A cell is pressed down
+    into its slot: its negative end compresses a spring plunger and its positive
+    end seats against a fixed contact. Polarity therefore decides which end of
+    the slot carries the spring.
+    """
 
     size_xyz: tuple[float, float, float]
     silhouette_length_m: float
@@ -48,20 +54,16 @@ class CompartmentGeometry:
     static_friction: float
     dynamic_friction: float
     restitution: float
-    back_face_x: float
-    mouth_x: float
-    front_face_x: float
     rear_face_x: float
-    channel_z_half: float
-    channel_y_half: float
-    lip_side_intrusion: float
-    lip_z_bottom: float
-    lip_end_x: float
+    front_face_x: float
     seat_center_x: float
+    floor_z_m: float
+    channel_y_half: float
+    spring_preload_m: float
     plunger_size_xyz: tuple[float, float, float]
-    plunger_center_x: float
-    plunger_mass_kg: float
     plunger_travel_m: float
+    plunger_end_gap_m: float
+    plunger_mass_kg: float
     plunger_stiffness: float
     plunger_damping: float
     plunger_effort_limit_n: float
@@ -150,11 +152,27 @@ class BatteryInsertionConfig:
     robot: RobotSpec
 
 
+CELL_NAMES = ("battery_a", "battery_b")
+
+
 def active_slots(cfg: BatteryInsertionConfig) -> tuple[SlotSpec, ...]:
     """Slots scored and cut into the compartment. Single-slot keeps the same package."""
     if cfg.single_slot:
         return cfg.compartment.slots[:1]
     return cfg.compartment.slots
+
+
+def cell_names(cfg: BatteryInsertionConfig) -> tuple[str, ...]:
+    """Physical cells spawned. They are interchangeable: neither is tied to a slot."""
+    return CELL_NAMES[: len(active_slots(cfg))]
+
+
+def plunger_joint_name(slot: SlotSpec) -> str:
+    return f"{slot.name}_plunger"
+
+
+def plunger_link_name(slot: SlotSpec) -> str:
+    return f"{slot.name}_plunger_link"
 
 
 def battery_pose(cfg: BatteryInsertionConfig, slot_name: str) -> PoseSpec:
@@ -244,8 +262,12 @@ def validate(cfg: BatteryInsertionConfig) -> None:
     if len(cfg.compartment.slots) != 2:
         problems.append("the config must define two slots; single_slot only hides the second")
     names = [slot.name for slot in cfg.compartment.slots]
-    if names != ["battery_a", "battery_b"]:
-        problems.append(f"slots must be battery_a then battery_b, got {names}")
+    if names != ["slot_a", "slot_b"]:
+        problems.append(f"slots must be slot_a then slot_b, got {names}")
+    for slot in cfg.compartment.slots:
+        axis = slot.required_axis_xyz
+        if abs(abs(axis[0]) - 1.0) > 1e-9 or abs(axis[1]) > 1e-9 or abs(axis[2]) > 1e-9:
+            problems.append(f"{slot.name} required_axis_xyz must be +X or -X, got {axis}")
     radius = cfg.battery.diameter_m / 2.0
     if abs(cfg.battery_a_pose.position_xyz[2] - (cfg.table.top_z_m + radius)) > 1e-6:
         problems.append("battery_a start z must be table top plus the battery radius")
@@ -254,6 +276,9 @@ def validate(cfg: BatteryInsertionConfig) -> None:
     half_height = cfg.compartment.size_xyz[2] / 2.0
     if abs(cfg.remote_pose.position_xyz[2] - (cfg.table.top_z_m + half_height)) > 1e-6:
         problems.append("remote start z must be table top plus half the remote height")
+    for side, pose in (("left", cfg.robot.left_pose), ("right", cfg.robot.right_pose)):
+        if abs(pose.position_xyz[2] - cfg.table.top_z_m) > 1e-6:
+            problems.append(f"robot {side} base z {pose.position_xyz[2]} must equal the table top {cfg.table.top_z_m}")
     camera_names = [camera.name for camera in cfg.cameras]
     if camera_names != ["overhead_cam", "front_cam", "side_cam"]:
         problems.append(f"cameras must be overhead_cam, front_cam, side_cam; got {camera_names}")

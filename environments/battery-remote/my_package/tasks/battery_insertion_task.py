@@ -19,7 +19,7 @@ from isaaclab_arena.tasks.task_termination_cfg import TaskTerminationCfg
 from isaaclab_arena.terms.events import reset_all_articulation_joints
 from isaaclab_arena.utils.configclass import make_configclass
 
-from my_package.scoring.config import BatteryInsertionConfig, active_slots
+from my_package.scoring.config import BatteryInsertionConfig, active_slots, cell_names, plunger_link_name
 from my_package.tasks.sim_bridge import (
     batteries_retained,
     battery_off_table,
@@ -74,13 +74,14 @@ class BatteryInsertionTask(TaskBase):
     def __init__(self, cfg: BatteryInsertionConfig):
         if cfg.single_slot:
             description = (
-                "Insert one AAA battery into slot A of the face-down remote. "
-                "The cover is already off. The positive terminal must match the red mark."
+                "Insert the AAA battery into the open slot of the face-down remote. "
+                "The cover is already off. The positive terminal goes to the red mark, the negative end to the spring."
             )
         else:
             description = (
                 "Insert both AAA batteries into the face-down remote. The cover is already off. "
-                "Slot A keeps the starting polarity and slot B requires the opposite direction."
+                "Either battery may go in either slot. In each slot the positive terminal goes to the red mark "
+                "and the negative end compresses the spring."
             )
         super().__init__(episode_length_s=cfg.scoring.episode_length_s, task_description=description)
         self.cfg = cfg
@@ -89,15 +90,15 @@ class BatteryInsertionTask(TaskBase):
         if not self.cfg.scoring.enable_contact_sensors:
             return None
         fields = []
-        for slot in active_slots(self.cfg):
-            plunger = "{ENV_REGEX_NS}/remote/" + slot.name.replace("battery_", "slot_") + "_plunger_link"
+        plungers = ["{ENV_REGEX_NS}/remote/" + plunger_link_name(slot) for slot in active_slots(self.cfg)]
+        for name in cell_names(self.cfg):
             fields.append(
                 (
-                    f"contact_{slot.name}",
+                    f"contact_{name}",
                     ContactSensorCfg,
                     ContactSensorCfg(
-                        prim_path="{ENV_REGEX_NS}/" + slot.name,
-                        filter_prim_paths_expr=["{ENV_REGEX_NS}/remote/chassis", plunger],
+                        prim_path="{ENV_REGEX_NS}/" + name,
+                        filter_prim_paths_expr=["{ENV_REGEX_NS}/remote/chassis", *plungers],
                     ),
                 )
             )
@@ -120,7 +121,7 @@ class BatteryInsertionTask(TaskBase):
                 CompletionCriteria(
                     name="battery_insertion",
                     predicate_sequence=[batteries_retained],
-                    description="Every active cell is fully seated, correctly oriented, released, and still retained.",
+                    description="Every active slot holds a fully seated, correctly oriented, released, and still retained cell.",
                 )
             ],
             failures={
@@ -131,7 +132,8 @@ class BatteryInsertionTask(TaskBase):
         )
 
     def get_events_cfg(self):
-        # Joint reset restores the robot home and the extended plungers. It does not weld a battery.
+        # Joint reset restores the robot home, the extended plungers, and the fixed remote's root pose.
+        # It does not weld a battery.
         # The score reset drops ever-lifted, retention timers, and hard-failure latches.
         return make_configclass(
             "BatteryEventsCfg",
@@ -169,4 +171,4 @@ class BatteryInsertionTask(TaskBase):
 
     def get_viewer_cfg(self) -> ViewerCfg:
         # Provisional. The smoke launch uses --visualizer none, so this is unused there.
-        return ViewerCfg(eye=(1.35, -0.9, 1.25), lookat=(0.50, 0.0, 0.78))
+        return ViewerCfg(eye=(1.35, -0.9, 0.503), lookat=(0.50, 0.0, 0.033))

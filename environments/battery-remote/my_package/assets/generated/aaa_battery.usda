@@ -8,13 +8,19 @@
 )
 
 def Xform "battery" (
-    prepend apiSchemas = ["PhysicsRigidBodyAPI", "PhysicsMassAPI", "PhysxRigidBodyAPI"]
+    prepend apiSchemas = ["PhysicsRigidBodyAPI", "PhysicsMassAPI", "PhysxRigidBodyAPI", "MaterialBindingAPI"]
 )
 {
     float physics:mass = 0.0115
-    float physics:staticFriction = 0.4
-    float physics:dynamicFriction = 0.3
-    float physics:restitution = 0
+    rel material:binding:physics = </battery/physics_material>
+    def Material "physics_material" (
+        prepend apiSchemas = ["PhysicsMaterialAPI"]
+    )
+    {
+        float physics:staticFriction = 0.4
+        float physics:dynamicFriction = 0.3
+        float physics:restitution = 0
+    }
     def Cylinder "body" (
         prepend apiSchemas = ["PhysicsCollisionAPI"]
     )
