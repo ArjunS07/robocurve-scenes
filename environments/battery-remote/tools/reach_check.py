@@ -173,6 +173,7 @@ def main() -> None:
     # Which Jacobian row/column convention this build uses is decided by measurement
     # (calibrate()), not assumed: the cda9d37 run with the assumed one never converged.
     layout = {}
+    measured_jac = {}
 
     def jacobian_variant(side, body_shift, col_shift):
         jac = raw_jacobian(side)
@@ -201,6 +202,7 @@ def main() -> None:
             targets[side] = base_targets.clone()
             step(int(0.6 / dt))
         measured = torch.stack(measured, dim=1)  # 3 x 6
+        measured_jac[side] = measured.clone()
         scores = {}
         for key, jac in variants.items():
             if jac is None:
@@ -244,34 +246,54 @@ def main() -> None:
         return hits
 
     def reach(side, goal, seconds=None):
-        """Closed-loop DLS IK on the fingertip midpoint; returns the residual and diagnostics."""
+        """Closed-loop DLS IK on the fingertip midpoint with a measured, Broyden-updated Jacobian.
+
+        The analytic Jacobian is for the gripper body, not the fingertips, and even the best
+        layout was 27% off the measured one (2c545c3), so it never converged. Start from the
+        Jacobian measured at home and correct it every step from the observed tip motion.
+        """
         goal_t = torch.tensor(goal, device=device, dtype=torch.float32)
         robot = robots[side]
+        joints = arm[side]["joints"]
         limits = _tensor(robot.data.soft_joint_pos_limits)[0]
         steps = int((seconds or args.reach_s) / dt)
-        damping = 0.05
-        error = None
+        damping = 0.02
+        jac = (measured_jac[side] if side in measured_jac else jacobian(side)).clone()
+        start_residual = float(torch.linalg.norm(goal_t - tip_mid(side)))
+        q_prev = _tensor(robot.data.joint_pos)[0, joints].clone()
+        p_prev = tip_mid(side).clone()
         for _ in range(steps):
             error = goal_t - tip_mid(side)
             if float(torch.linalg.norm(error)) < args.tolerance_m * 0.5:
                 break
-            jac = jacobian(side)
             jjt = jac @ jac.T + (damping**2) * torch.eye(3, device=device)
-            dq = jac.T @ torch.linalg.solve(jjt, error)
-            dq = torch.clamp(dq, -0.02, 0.02)
-            for k, j in enumerate(arm[side]["joints"]):
-                targets[side][0, j] = torch.clamp(targets[side][0, j] + dq[k], limits[j, 0], limits[j, 1])
+            dq = torch.clamp(jac.T @ torch.linalg.solve(jjt, error), -0.02, 0.02)
+            q_now = _tensor(robot.data.joint_pos)[0, joints]
+            for k, j in enumerate(joints):
+                # Keep the target within 0.15 rad of the actual joint so it cannot wind up far ahead.
+                new = torch.clamp(targets[side][0, j] + dq[k], q_now[k] - 0.15, q_now[k] + 0.15)
+                targets[side][0, j] = torch.clamp(new, limits[j, 0], limits[j, 1])
             step()
+            q = _tensor(robot.data.joint_pos)[0, joints].clone()
+            p = tip_mid(side).clone()
+            d_q, d_p = q - q_prev, p - p_prev
+            if float(d_q @ d_q) > 1e-8:
+                jac = jac + torch.outer(d_p - jac @ d_q, d_q) / float(d_q @ d_q)
+            q_prev, p_prev = q, p
         step(30)  # let the drives settle on the last target
         error = goal_t - tip_mid(side)
         residual = float(torch.linalg.norm(error))
         return {
             "goal": [round(v, 4) for v in goal],
             "reached": residual <= args.tolerance_m,
+            "start_residual_mm": round(1000 * start_residual, 2),
             "residual_mm": round(1000 * residual, 2),
             "joints_at_limit": at_limit(side),
+            "target_minus_actual_rad": [
+                round(float(targets[side][0, j] - _tensor(robot.data.joint_pos)[0, j]), 3) for j in joints
+            ],
             "gripper_axes_world": gripper_axes(side),
-            "joint_pos_rad": [round(float(_tensor(robot.data.joint_pos)[0, j]), 3) for j in arm[side]["joints"]],
+            "joint_pos_rad": [round(float(_tensor(robot.data.joint_pos)[0, j]), 3) for j in joints],
         }
 
     def nearer_arm(xy):
