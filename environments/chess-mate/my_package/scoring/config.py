@@ -28,10 +28,25 @@ class PieceProfile:
 
 
 @dataclass(frozen=True)
+class PieceMeshSpec:
+    """Scale and materials for the committed Poly Haven piece meshes."""
+
+    scale_xy: float
+    scale_z: float
+    white_rgb: tuple[float, float, float]
+    white_roughness: float
+    black_rgb: tuple[float, float, float]
+    black_roughness: float
+
+
+@dataclass(frozen=True)
 class BoardSpec:
     square_m: float
     border_m: float
     thickness_m: float
+    inlay_gap_m: float
+    inlay_width_m: float
+    corner_radius_m: float
     mass_kg: float
     static_friction: float
     dynamic_friction: float
@@ -104,11 +119,7 @@ class RobotSpec:
 class ChessMateConfig:
     light_intensity: float
     fen_sequence: tuple[str, ...]
-    white_rgb: tuple[float, float, float]
-    black_rgb: tuple[float, float, float]
-    frame_rgb: tuple[float, float, float]
-    light_square_rgb: tuple[float, float, float]
-    dark_square_rgb: tuple[float, float, float]
+    piece_mesh: PieceMeshSpec
     board: BoardSpec
     pieces: tuple[PieceProfile, ...]
     scoring: ScoringSpec
@@ -220,6 +231,11 @@ def validate(cfg: ChessMateConfig) -> None:
     for side, pose in (("left", cfg.robot.left_pose), ("right", cfg.robot.right_pose)):
         if abs(pose.position_xyz[2] - cfg.table.top_z_m) > 1e-9:
             problems.append(f"robot {side} base z must equal the table top")
+        center_x, center_y = cfg.table.center_xy
+        half_x, half_y = cfg.table.half_extents_xy
+        margin = 0.03
+        if abs(pose.position_xyz[0] - center_x) > half_x - margin or abs(pose.position_xyz[1] - center_y) > half_y - margin:
+            problems.append(f"robot {side} base must lie on the table footprint, {margin} m inside its edge")
     camera_names = [camera.name for camera in cfg.cameras]
     if camera_names != ["overhead_cam", "front_cam", "side_cam"]:
         problems.append(f"cameras must be overhead_cam, front_cam, side_cam; got {camera_names}")

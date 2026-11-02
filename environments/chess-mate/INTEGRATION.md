@@ -35,6 +35,18 @@ Client settings that worked for the Franka example: server `global.prd.ga.run.br
 
 Options: `--enable-cameras`, `--num-steps N`, `--arena-root PATH`.
 
+Visual and resting check (headless Kit with cameras, no streaming, no Arena runner). It builds the same table, board, pieces, and arms, settles 3 s, and writes PNGs and `report.json` to `outputs/render_check/<git revision>/`:
+
+```bash
+/home/ubuntu/workspace/IsaacLab-Arena/.venv/bin/python tools/render_check.py
+```
+
+Rebuilding the committed chess-set assets (only when changing board dimensions or the mesh source; needs network, numpy, Pillow):
+
+```bash
+python3 tools/build_chess_assets.py
+```
+
 The launcher puts this directory and the Arena checkout on `sys.path`, imports `torch` before Kit (CUDA library order on this machine), then runs `isaaclab_arena/evaluation/policy_runner.py`. Runner flags come before the `chess_mate` subcommand:
 
 ```text
@@ -50,7 +62,7 @@ The launcher puts this directory and the Arena checkout on `sys.path`, imports `
 chess_mate
 ```
 
-Generated USD and the evaluator sheet are written to a fresh `outputs/assets-*` directory per launch (`ROBOCURVE_GENERATED_DIR`), not over the tracked examples in `my_package/assets/generated/`. `outputs/` is git-ignored. The task string does not name the mating piece or square; do not put `puzzle_record.txt` into the policy prompt.
+Generated USD and the evaluator sheet are written to a fresh `outputs/assets-*` directory per launch (`ROBOCURVE_GENERATED_DIR`), never into the source tree (`my_package/assets/generated/` keeps only the evaluator sheets). `outputs/` is git-ignored. The task string does not name the mating piece or square; do not put `puzzle_record.txt` into the policy prompt.
 
 ## If startup fails
 

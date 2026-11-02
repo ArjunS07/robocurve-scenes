@@ -1,0 +1,94 @@
+{
+ "board_texture": {
+  "border_m": 0.01335,
+  "inlay_gap_m": 0.0025,
+  "inlay_width_m": 0.0008,
+  "seed": 7,
+  "size_px": 2048,
+  "square_m": 0.03
+ },
+ "collision": {
+  "bands": 10,
+  "hull_points": 24
+ },
+ "pieces": {
+  "bishop": {
+   "base_radius_m": 0.01610942687460801,
+   "half_extent_x_m": 0.016104085370898247,
+   "half_extent_y_m": 0.016200123354792595,
+   "height_m": 0.08581218123435974,
+   "max_radius_m": 0.016223443231643285,
+   "node": "piece_bishop_white_01",
+   "triangles": 2924
+  },
+  "king": {
+   "base_radius_m": 0.020904758677437452,
+   "half_extent_x_m": 0.02076357789337635,
+   "half_extent_y_m": 0.02086005825549364,
+   "height_m": 0.09500318765640259,
+   "max_radius_m": 0.020904758677437452,
+   "node": "piece_king_white",
+   "triangles": 4172
+  },
+  "knight": {
+   "base_radius_m": 0.01955798727841495,
+   "half_extent_x_m": 0.02411609197054236,
+   "half_extent_y_m": 0.019397916697431516,
+   "height_m": 0.0749985836744873,
+   "max_radius_m": 0.02411609197054236,
+   "node": "piece_knight_white_01",
+   "triangles": 2662
+  },
+  "pawn": {
+   "base_radius_m": 0.014219583557402032,
+   "half_extent_x_m": 0.014453708194196224,
+   "half_extent_y_m": 0.014495132025331259,
+   "height_m": 0.05370334871655347,
+   "max_radius_m": 0.014495132449209821,
+   "node": "piece_pawn_white_01",
+   "triangles": 1640
+  },
+  "queen": {
+   "base_radius_m": 0.01852256677094859,
+   "half_extent_x_m": 0.020306140184402466,
+   "half_extent_y_m": 0.020397715270519257,
+   "height_m": 0.09072045123321004,
+   "max_radius_m": 0.020467165899993835,
+   "node": "piece_queen_white",
+   "triangles": 2940
+  },
+  "rook": {
+   "base_radius_m": 0.01839362201033961,
+   "half_extent_x_m": 0.018383548595011234,
+   "half_extent_y_m": 0.018352235667407513,
+   "height_m": 0.060570885816559894,
+   "max_radius_m": 0.018475082861652756,
+   "node": "piece_rook_white_01",
+   "triangles": 2976
+  }
+ },
+ "source": {
+  "author": "Riley Queen",
+  "files": {
+   "chess_set.bin": {
+    "sha256": "c73476fd032a2cb4a9c256f70573eed260708132fdc42fec161c6216711560b3",
+    "url": "https://dl.polyhaven.org/file/ph-assets/Models/gltf/1k/chess_set/chess_set.bin"
+   },
+   "chess_set_1k.gltf": {
+    "sha256": "3e21ecd0c2ffb703dfdb3f3ea7a379c1dbd4ec513ba2cb8e6cb1e5f276d7eb91",
+    "url": "https://dl.polyhaven.org/file/ph-assets/Models/gltf/1k/chess_set/chess_set_1k.gltf"
+   }
+  },
+  "license": "CC0 1.0",
+  "name": "Chess Set",
+  "nodes": {
+   "bishop": "piece_bishop_white_01",
+   "king": "piece_king_white",
+   "knight": "piece_knight_white_01",
+   "pawn": "piece_pawn_white_01",
+   "queen": "piece_queen_white",
+   "rook": "piece_rook_white_01"
+  },
+  "page": "https://polyhaven.com/a/chess_set"
+ }
+}

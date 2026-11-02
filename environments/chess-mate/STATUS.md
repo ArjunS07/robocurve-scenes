@@ -63,20 +63,38 @@ Result on the Mac: `Ran 28 tests` — `OK`. The tests drive `step`, the puzzle b
 
 ## Quaternion order (one switch)
 
-`my_package/tasks/state_values.py` has `SIM_QUAT_ORDER = "xyzw"`. Both reading `root_quat_w` and writing `write_root_pose_to_sim` go through it. Isaac Lab 3 documents xyzw; Isaac Lab 2.x used wxyz. This has not been checked on the installed runtime. If an untouched board immediately trips `board_moved`, or pieces spawn rotated after the first reset, check the installed order and change only that constant.
+`my_package/tasks/state_values.py` has `SIM_QUAT_ORDER = "xyzw"`. Both reading `root_quat_w` and writing `write_root_pose_to_sim` go through it. **Verified on the server** (Isaac Lab 17.0.2, Kit 110.3): a cube turned 90° about X reads back `[0.707, 0, 0, 0.707]`, and the init-state default is `(0, 0, 0, 1)`.
 
-## Still unproven until a GPU run
+## Verified on the server
 
-- the scene steps past the first rollout step and the recorder/reset callbacks accept the env-id types they receive
-- the installed quaternion order (above)
-- whether the pieces stand, can be pinched, and stay put when a neighbour is moved
-- friction, mass, and the provisional drive gains
-- the maple table top is measured (z = 0.003, footprint x 0.199–0.899, y −0.478–0.522, via `environments/tools/probe_runtime.py --sim`); whether pieces actually settle on it is not yet seen in a run
-- robot base poses, home pose, reach to d1 and h5, and collisions with the board
-- USDA joint names, the `gripper` body name, and finger sign
-- camera frames
-- the launcher's `--output_base_dir`, `--visualizer kit`, and `--livestream 1` flags against the installed runner
+- revision 33733f1 (before the visual rework): a 50-step zero-action run completes with no false failure (`num_episodes: 0`); recorder and reset callbacks accept what they receive; the YAM joints `joint1`..`joint8` load with the configured gains and limits; WebRTC streaming works
+- quaternion order xyzw; maple table spawned at the origin, collision top z = 0.003, footprint x 0.1986–0.8986, y −0.4779–0.5221 (`environments/tools/probe_runtime.py --sim`)
+
+## Not yet verified (needs the server)
+
+- the reworked visuals: textured board, Poly Haven pieces, materials (run `tools/render_check.py`)
+- pieces resting without penetration or creep on the new colliders (same script, `settle` section)
+- the YAM base footprint and origin against the tabletop at the new x = 0.27 placement (same script, `robots` section), reach to d1 and h5, and whether the YAM asset has colliders at all
+- whether pieces can be pinched; friction, mass, and drive gains
+- camera frames for policy observations
 
 ## The set
 
-The board is a procedural slab, not a mesh of the photographed 3-in-1 set. Square size 32 mm, border 28 mm, overall about 312 mm, king height 62 mm, and pawn height 32 mm are provisional. a1 is dark. Rank 1 faces -X, toward the robot bases. Pieces are separate rigid bodies. The board is a heavy rigid body on a visual mark, not a weld.
+Reference: Regal Games 10.5 × 10.5 in reversible wooden board (ASIN B08C1QBGQJ) and the user's product photo.
+
+| Quantity | Value | Source |
+| --- | --- | --- |
+| Board outer size | 0.2667 m (10.5 in) | listing |
+| Square / border | 30 mm / 13.35 mm | estimated from the photo (border a little under half a square) |
+| Thickness | 8 mm | estimated; the listing's "0.04 in" is not plausible |
+| Inlay line, corner radius | 0.8 mm line 2.5 mm outside the field; 8 mm corners | estimated |
+| King / pawn height | 60.8 mm / 34.4 mm | estimated (king about two squares tall) |
+| Board mass, piece masses | unchanged | estimates |
+
+**Board.** One rigid body. Its visual is a rounded slab: a single textured top face (squares, inlay line, and border all in one texture), a wood edge, and a bottom. Nothing overlaps the top face, which removes the z-fighting the old 64 coplanar square cubes caused. The collider is a separate flat-topped convex hull (purpose `guide`, 56 vertices, under PhysX's 64 limit). The texture is generated with a fixed seed by `tools/build_chess_assets.py`: honey oak veneer, near-black squares, a1 dark.
+
+**Pieces.** Meshes are Poly Haven's "Chess Set" by Riley Queen (CC0), <https://polyhaven.com/a/chess_set>, converted to meters, Z-up, base-centred, the knight's muzzle toward +X (black pieces are yawed 180°). They are Staunton pieces, not the Regal set's simpler turned profiles, and no CC0 model of that set was found; the itch.io set by Deplorable Mountaineer (CC0) was inspected too and is also Staunton, multi-part, and textured as aged wood. To approach the Regal look the meshes are scaled 0.52 in XY and 0.64 in Z (slimmer, shorter) and get cream-lacquer and glossy-black `UsdPreviewSurface` materials instead of marble. Collision is 10 stacked convex prisms per piece, each the convex hull of the mesh section in its height band, so the base, stem, collar, and head are matched. The scorer's `height_m` and `base_radius_m` are the scaled mesh values; config loading fails if they drift from `assets/chess_set/manifest.json`.
+
+**Reproducing the assets.** `python3 tools/build_chess_assets.py` downloads the glTF with pinned SHA-256s, converts it, writes the collision prisms, draws the textures, and writes `manifest.json` and `LICENSE-CC0.txt`. Launching never downloads anything; if `assets/chess_set` is incomplete, geometry generation raises `FileNotFoundError` naming the missing files instead of falling back to placeholders.
+
+**Placement.** a1 is dark. Rank 1 faces −X, toward the robots. The board is centred on the table's centre line at x = 0.55. Both YAM bases now sit on the tabletop at x = 0.27 (7 cm inside the near edge), y = ±0.22; before, they were at x = −0.05, 0.25 m in front of the table, which is why they looked suspended. Config loading rejects a base outside the table footprint.
