@@ -446,3 +446,11 @@ class StateValueTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class HoldPointTests(unittest.TestCase):
+    def test_holding_is_measured_from_the_fingertips(self):
+        from pathlib import Path
+
+        text = (Path(__file__).resolve().parents[1] / "my_package" / "tasks" / "sim_bridge.py").read_text()
+        self.assertIn('("tip_left", "tip_right")', text)

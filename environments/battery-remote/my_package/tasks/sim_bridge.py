@@ -91,6 +91,15 @@ def _peak_force(sensor, env_index: int) -> float:
     return float(torch.linalg.norm(sample, dim=-1).max())
 
 
+def _find_tip(asset, side: str, name: str):
+    """Fingertip body index: ``tip_left`` on a single-arm USDA, ``left_tip_left`` on a combined one."""
+    for candidate in (name, f"{side}_{name}"):
+        index = _find_one(asset, candidate, "body")
+        if index is not None:
+            return index
+    return None
+
+
 def _gripper_observation(env, env_index: int, cfg):
     positions = []
     fingers = []
@@ -116,8 +125,16 @@ def _gripper_observation(env, env_index: int, cfg):
             )
             continue
         origin = env.scene.env_origins[env_index]
-        body_pos = asset.data.body_pos_w[env_index, body_index] - origin
-        positions.append(_as_tuple3(body_pos))
+        # Hold point: midpoint of the two fingertip bodies (measured on the YAM USDA as
+        # tip_left / tip_right). The gripper body's origin sits several cm behind the tips, so
+        # measuring from it could miss a cell pinched between the fingers.
+        tips = [_find_tip(asset, binding.side, name) for name in ("tip_left", "tip_right")]
+        if all(index is not None for index in tips):
+            hold_pos = 0.5 * (asset.data.body_pos_w[env_index, tips[0]] + asset.data.body_pos_w[env_index, tips[1]]) - origin
+        else:
+            _warn(f"tips-{binding.side}", f"fingertip bodies not found on {binding.asset_name}; holding is measured from the gripper body")
+            hold_pos = asset.data.body_pos_w[env_index, body_index] - origin
+        positions.append(_as_tuple3(hold_pos))
         joint_pos = asset.data.joint_pos[env_index]
         fingers.append((float(joint_pos[finger_ids[0]]), float(joint_pos[finger_ids[1]])))
     return tuple(positions), tuple(fingers)

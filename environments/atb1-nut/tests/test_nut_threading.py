@@ -780,3 +780,10 @@ class ActionTermAbcTests(unittest.TestCase):
             self.assertRegex(text, rf"@property\n    def {name}\(self\)")
         for name in ("process_actions", "apply_actions"):
             self.assertIn(f"def {name}(self", text)
+
+
+class HoldPointTests(unittest.TestCase):
+    def test_holding_is_measured_from_the_fingertips(self):
+        text = (Path(__file__).resolve().parents[1] / "my_package" / "tasks" / "sim_bridge.py").read_text()
+        self.assertIn('"tip_left"', text)
+        self.assertIn('"tip_right"', text)

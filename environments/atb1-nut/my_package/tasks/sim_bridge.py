@@ -96,7 +96,18 @@ def _arm_reading(robot, env_index, origin, nut_position, body_name: str, finger_
         )
         return None
     body_index = body_names.index(body_name)
-    body_world = _row(_tensor(robot.data.body_pos_w)[env_index], body_index)
+    positions = _tensor(robot.data.body_pos_w)[env_index]
+    # Hold point: midpoint of the fingertip bodies (tip_left / tip_right on the YAM USDA), not the
+    # gripper body's origin, which sits several cm behind the tips.
+    prefix = body_name[: -len("gripper")] if body_name.endswith("gripper") else ""
+    tip_names = [prefix + "tip_left", prefix + "tip_right"]
+    if all(name in body_names for name in tip_names):
+        left_tip = _row(positions, body_names.index(tip_names[0]))
+        right_tip = _row(positions, body_names.index(tip_names[1]))
+        body_world = tuple(0.5 * (a + b) for a, b in zip(left_tip, right_tip))
+    else:
+        _warn_once(f"tips-{body_name}", f"nut threading: fingertip bodies {tip_names} not found; holding is measured from {body_name!r}")
+        body_world = _row(positions, body_index)
     body_local = env_local_position(body_world, origin)
     joint_pos = _row(robot.data.joint_pos, env_index)
     fingers = [float(joint_pos[joint_names.index(name)]) for name in finger_names]
