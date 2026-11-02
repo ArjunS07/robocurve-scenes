@@ -199,6 +199,23 @@ class ScoringTests(unittest.TestCase):
         _, report = self._run(self._lifted(), inside, inside)
         self.assertEqual(report.score, 100)
 
+    def test_unknown_plunger_reading_never_inserts(self):
+        """A missing plunger joint is unknown, not the authored rest pose: no credit, and reported."""
+        unknown = self._seated(fit_overrides={"spring_contact": None})
+        _, report = self._run(self._lifted(), unknown, unknown, unknown)
+        self.assertEqual(report.inserted, {"slot_a": False, "slot_b": False})
+        self.assertEqual(report.score, 25)
+        self.assertEqual(report.spring_unknown, ("slot_a", "slot_b"))
+
+    def test_measure_without_a_plunger_reading_reports_unknown_contact(self):
+        slot = self.cfg.compartment.slots[0]
+        remote = self.cfg.remote_pose
+        seated = (remote.position_xyz[0] + self.cfg.compartment.seat_center_x, slot.center_y_m, remote.position_xyz[2] + rest_center_z(self.cfg))
+        known = measure_battery(self.cfg, slot, seated, PLUS_X_QUAT, remote.position_xyz, remote.rotation_xyzw, plunger_joint_m=self.cfg.compartment.spring_preload_m)
+        self.assertTrue(known.spring_contact)
+        missing = measure_battery(self.cfg, slot, seated, PLUS_X_QUAT, remote.position_xyz, remote.rotation_xyzw, plunger_joint_m=None)
+        self.assertIsNone(missing.spring_contact)
+
     def test_missing_spring_contact_does_not_insert(self):
         loose = self._seated(fit_overrides={"spring_contact": False})
         _, report = self._run(self._lifted(), loose, loose)

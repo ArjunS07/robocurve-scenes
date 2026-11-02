@@ -123,15 +123,25 @@ def _gripper_observation(env, env_index: int, cfg):
     return tuple(positions), tuple(fingers)
 
 
-def _plunger_position(env, env_index: int, joint_name: str) -> float:
+def _plunger_position(env, env_index: int, joint_name: str) -> float | None:
+    """Live plunger joint position, or None when it cannot be read.
+
+    None makes spring contact unknown for that slot, which blocks insertion credit.
+    The authored rest pose (0) is never substituted for a missing reading.
+    """
     try:
         remote = env.scene["remote"]
     except Exception:
-        return 0.0
+        _warn("remote-missing", "battery insertion could not find the remote articulation; spring contact is UNKNOWN")
+        return None
     index = _find_one(remote, joint_name, "joint")
     if index is None:
-        _warn(joint_name, f"plunger joint {joint_name} was not found; spring pose stays at the authored 0")
-        return 0.0
+        _warn(
+            joint_name,
+            f"plunger joint {joint_name} was not found (live joints: {list(getattr(remote, 'joint_names', []))}); "
+            "spring contact is UNKNOWN for that slot, so it cannot earn insertion credit",
+        )
+        return None
     return float(remote.data.joint_pos[env_index, index])
 
 
@@ -266,6 +276,9 @@ def damage_proxy(env):
 
 
 def insertion_state_tracker(env):
-    """Reward term whose only job is to advance the scorer before terminations."""
+    """Reward term: advance the scorer before terminations, and take optional camera captures."""
     update_from_env(env)
+    from my_package.tasks.capture import maybe_capture
+
+    maybe_capture(env, _step_id(env))
     return torch.zeros(env.num_envs, device=env.device)

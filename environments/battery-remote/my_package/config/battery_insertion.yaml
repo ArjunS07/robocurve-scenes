@@ -22,13 +22,20 @@ battery:
   restitution: 0.0
 
 compartment:
-  # Battery-bay collision size, meters. The cover is removed, so the bay is open from above.
-  # The remote lies face down: the button face is on the table and the bay faces up.
-  size_xyz: [0.140, 0.050, 0.022]
-  # Full wand length. Provisional likeness of the listed Angrox/LG-style remote
-  # (ASIN B07T4N7NTX), whose page gives 23.5 x 4.8 x 2.4 cm. Not that product's CAD.
-  # The extra length is a solid nose past the rear face.
+  # Reference: Angrox LG-style replacement remote, ASIN B07T4N7NTX.
+  # MEASURED (listing): 23.5 x 4.8 x 2.4 cm, black ABS, two AAA cells.
+  # ESTIMATED (photo / typical two-AAA bays; the listing gives no bay drawing): everything else.
+  # The remote lies face down: the button face is on the table and the open bay faces up.
+  # Collision block around the bay, meters: 46 mm wide (ESTIMATED; the listed 48 mm is the
+  # widest point, at the IR end) and 22 mm tall (ESTIMATED; the listed 24 mm is the maximum).
+  size_xyz: [0.140, 0.046, 0.022]
+  # Full wand length. MEASURED (listing). The extra length is a solid nose past the rear face.
   silhouette_length_m: 0.235
+  # Visual shell: widest at the IR nose (half of the listed 48 mm), tapering to the bay
+  # width; rounded ends and filleted top edges. Fillet and end radius are ESTIMATED.
+  shell_nose_half_width_m: 0.024
+  shell_edge_fillet_m: 0.004
+  shell_end_radius_m: 0.012
   # Authored on the chassis in the generated USDA. The spawner does not override it.
   mass_kg: 0.080
   static_friction: 0.50
@@ -107,21 +114,21 @@ table:
 # Identity quaternion is xyzw (0, 0, 0, 1). Battery quaternion is +90 deg about Y,
 # which maps the cell's local +Z (positive terminal) onto world +X.
 remote_pose:
-  position_xyz: [0.50, 0.00, 0.014]
+  position_xyz: [0.57, 0.00, 0.014]
   rotation_xyzw: [0.0, 0.0, 0.0, 1.0]
 battery_a_pose:
-  position_xyz: [0.50, -0.090, 0.00825]
+  position_xyz: [0.57, -0.090, 0.00825]
   rotation_xyzw: [0.0, 0.7071067811865475, 0.0, 0.7071067811865476]
 battery_b_pose:
-  position_xyz: [0.50, 0.090, 0.00825]
+  position_xyz: [0.57, 0.090, 0.00825]
   rotation_xyzw: [0.0, 0.7071067811865475, 0.0, 0.7071067811865476]
 
 cameras:
   # Poses are provisional. Rotations are the ROS optical look-at of eye toward target.
   # Physics smoke does not spawn them. Pass --enable-cameras to spawn them.
   - name: overhead_cam
-    eye_xyz: [0.50, 0.00, 0.553]
-    target_xyz: [0.50, 0.00, 0.013]
+    eye_xyz: [0.57, 0.00, 0.553]
+    target_xyz: [0.57, 0.00, 0.013]
     rotation_xyzw: [1.0, 0.0, 0.0, 0.0]
     width: 256
     height: 256
@@ -130,8 +137,8 @@ cameras:
     horizontal_aperture: 5.376
     vertical_aperture: 3.024
   - name: front_cam
-    eye_xyz: [1.05, 0.00, 0.303]
-    target_xyz: [0.50, 0.00, 0.033]
+    eye_xyz: [1.12, 0.00, 0.303]
+    target_xyz: [0.57, 0.00, 0.033]
     rotation_xyzw: [-0.6001402316624453, 0.6001402316624455, 0.3739407738401181, -0.3739407738401181]
     width: 256
     height: 256
@@ -140,8 +147,8 @@ cameras:
     horizontal_aperture: 5.376
     vertical_aperture: 3.024
   - name: side_cam
-    eye_xyz: [0.50, -0.70, 0.253]
-    target_xyz: [0.50, 0.00, 0.033]
+    eye_xyz: [0.57, -0.70, 0.253]
+    target_xyz: [0.57, 0.00, 0.033]
     rotation_xyzw: [0.0, 0.8061720029684715, 0.5916812500238644, 0.0]
     width: 256
     height: 256
@@ -178,10 +185,13 @@ robot:
   arm_velocity_limit: 3.0
   finger_effort_limit: 10.0
   finger_velocity_limit: 0.2
-  # Bases are provisional. The USDA forward axis was not opened on this machine.
+  # Bases stand on the measured tabletop (x 0.1986..0.8986, y -0.4779..0.5221, z 0.003),
+  # 7 cm in from the near edge. The loader checks XY against the footprint and that the bay
+  # and both cells are 0.20..0.45 m from the nearer base. The YAM base-link footprint and
+  # the arm's forward axis are NOT measured yet; see environments/tools/probe_runtime.py.
   left_pose:
-    position_xyz: [-0.05, 0.22, 0.003]
+    position_xyz: [0.27, 0.20, 0.003]
     rotation_xyzw: [0.0, 0.0, 0.0, 1.0]
   right_pose:
-    position_xyz: [-0.05, -0.22, 0.003]
+    position_xyz: [0.27, -0.20, 0.003]
     rotation_xyzw: [0.0, 0.0, 0.0, 1.0]

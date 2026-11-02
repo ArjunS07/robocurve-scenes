@@ -1,16 +1,6 @@
-# Copy this package onto the remote machine
+# Running this package on the server
 
-The files in this directory are the drop-in. Nothing here was run on robocurve-sim.
-
-## Copy
-
-From a checkout of this directory, copy onto the remote project root. Do not use `--delete`, or the copy will remove the Franka example that already lives there.
-
-```bash
-rsync -a --exclude '__pycache__' ./ /home/ubuntu/workspace/robocurve/battery-remote/
-```
-
-That adds `launch_battery_insertion.py`, `my_package/` (battery scene, task, embodiment, config), and `tests/`. It does not replace a file this package does not contain.
+The server checkout is `/home/ubuntu/workspace/robocurve-scenes` (a clone of this repository). Update it with `git pull`; run everything from `environments/battery-remote`. See STATUS.md for what has and has not been verified there.
 
 ## Do not touch
 
@@ -32,8 +22,22 @@ from my_package.isaaclab_arena_environments.battery_environment import BatteryIn
 Physics smoke, zero action, 50 steps. This is not a 90 second episode and the arm does not insert a battery.
 
 ```bash
-cd /home/ubuntu/workspace/robocurve/battery-remote
+cd /home/ubuntu/workspace/robocurve-scenes/environments/battery-remote
 /home/ubuntu/workspace/IsaacLab-Arena/.venv/bin/python launch_battery_insertion.py
+```
+
+Physics check with scripted insertion, retention, disturbance, pull-out, and reversed-polarity trials, plus 1280x720 renders and collision overlays. No Arena runner and no streaming; it starts Kit with Isaac Lab's headless rendering experience. Outputs go to `outputs/physics_check/<revision>/` (`report.json` and PNGs):
+
+```bash
+/home/ubuntu/workspace/IsaacLab-Arena/.venv/bin/python tools/physics_check.py
+# physics only, if rendering fails:
+/home/ubuntu/workspace/IsaacLab-Arena/.venv/bin/python tools/physics_check.py --no-render
+```
+
+Task-camera snapshots during a launcher run (steps 1, 25, 49 by default; override with `ROBOCURVE_CAPTURE_STEPS=1,10,49`):
+
+```bash
+/home/ubuntu/workspace/IsaacLab-Arena/.venv/bin/python launch_battery_insertion.py --enable-cameras --capture-dir outputs/captures
 ```
 
 Slot A only, same package:
@@ -80,5 +84,5 @@ Launch writes the scene assets from the YAML into a new `outputs/assets-*` direc
 - Contact-sensor prims abort the app: set `scoring.enable_contact_sensors: false` in `my_package/config/battery_insertion.yaml`. The damage proxy then stays at 0.
 - The action term prints the live joint list: set `robot.arm_layout` to `duplicated_single_arm` (USDA spawned twice, joints `joint1`..`joint8` on each) or `combined` (one articulation, `left_joint*` / `right_joint*`). Those prefixed names are the station URDF, not something confirmed on the USDA.
 - Finger direction is backwards: the source URDF opens toward negative joint values (`finger_open_m: -0.04695`, `finger_closed_m: 0`). The station URDF uses the positive range. Change both numbers together. The USDA file is not edited.
-- `UsdFileCfg` rejects `rigid_props`, `collision_props`, `mass_props`, or `articulation_props`: drop the rejected field in `my_package/assets/spawn.py`. If `articulation_props` / `fix_root_link` is rejected, the remote is no longer secured; report it rather than silently continuing. Friction is authored as USD physics materials, so `physics_material` is not passed.
+- `UsdFileCfg` rejects `rigid_props`, `collision_props`, or `mass_props`: drop the rejected field in `my_package/assets/spawn.py`. The remote's fixture is authored in its USDA (`root_joint`), so no `articulation_props` / `fix_root_link` is passed. If the remote moves anyway, `physics_check.py` reports `remote_displacement_mm` and `is_fixed_base`.
 - Generated assets go to a fresh `outputs/assets-*` directory per launch (`ROBOCURVE_GENERATED_DIR`). The tracked files in `my_package/assets/generated/` are examples, kept identical to the generator by a test.

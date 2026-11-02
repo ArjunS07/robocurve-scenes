@@ -1,46 +1,40 @@
----
-cursor:
-  subagentId: "bc-cb898d1a-d858-5870-b600-a0eb229b5ec4"
----
-
 # Battery insertion status
 
-## Code-checked vs. demonstrated
+Three kinds of evidence, kept apart below: **verified on the server**, **code-checked** (pure tests, USD composition with `usd-core`, no PhysX), and **unverified**.
 
-Code-checked on a Mac with no Isaac Sim (`python3 tests/run_pure_tests.py`: `Ran 60 tests` — `OK`), plus a stubbed run of `sim_bridge.update_from_env` / `scores_tensor` / the reset callback with list env ids.
+## Verified on the server
 
-Measured on the server (Isaac Lab 17.0.2 / Kit 110.3) with `environments/tools/probe_runtime.py`:
+Isaac Lab 17.0.2 / Kit 110.3 on the L40S, via `environments/tools/probe_runtime.py` and earlier launches:
 
-- `root_quat_w` is **xyzw** (a 90° X turn reads `[0.707, 0, 0, 0.707]`). `state_values.quaternion_xyzw` keeps that order; the old wxyz reordering is gone.
-- `maple_table_robolab` spawns at the origin. Its collision top is z = 0.003 and its footprint is x [0.1986, 0.8986], y [-0.4779, 0.5221] (`probe_runtime.py --sim`). Every world z in the YAML was shifted by -0.747 m from the old 0.75 guess, and `validate` now requires both robot bases to sit at the table top.
-- YAM USDA: fixed-base single arm, `joint1`..`joint6` revolute, `joint7`/`joint8` prismatic in [-0.04695, 0], bodies `base`, `link1`..`link5`, `gripper`, `tip_left`, `tip_right`. `duplicated_single_arm` and `gripper` are correct. The home pose is inside the limits.
+- `root_quat_w` is **xyzw** (a 90° X turn reads `[0.707, 0, 0, 0.707]`); `state_values.quaternion_xyzw` keeps that order.
+- `maple_table_robolab` spawns at the origin; collision top z = 0.003; footprint x [0.1986, 0.8986], y [-0.4779, 0.5221].
+- YAM USDA: fixed-base single arm (`root_joint` is a `PhysicsFixedJoint` from the `/yam` Xform to the `base` rigid body, which carries `ArticulationRootAPI`), joints `joint1`..`joint8`, bodies `base`, `link1`..`link5`, `gripper`, `tip_left`, `tip_right`. The YAM USDA has **no colliders**; the embodiment now adds convex-hull link colliders at spawn (ported from chess).
+- `UsdFileCfg` accepts `physics_material` (the chess scene passes it and ran). The earlier note here that it is "not a file-spawner field" was wrong. This package still authors friction as USD physics materials, which also works; nothing depends on the spawner field.
+- Startup at `30f984e` failed: `fix_root_link=True` cannot be applied when `ArticulationRootAPI` sits on a non-rigid Xform. That is fixed below; **the fix has not been run on the server yet.**
 
-**Not demonstrated in physics yet.** No physics run since these changes has shown that a cell can be inserted, stays seated after release, or that the fixed remote and the plungers behave as designed. The pure tests prove the scorer's logic and the generated geometry's clearances, not PhysX behavior.
+## Code-checked (not physics)
 
-## Task model
+`python3 tests/run_pure_tests.py`: 79 tests, OK (1 skipped here because `pxr` is not installed; it passes with `usd-core`).
 
-- **Cover removed.** Each slot is an open-top trough with no ceiling and no lips: floor, side walls, a fixed contact at the positive end, and a spring plunger at the negative end (slot A: + toward +X; slot B: + toward -X). Red marks on the rim sit over the fixed (+) contacts.
-- **Insertion.** The cell is pressed down from above, negative end first into the plunger. With the plunger fully compressed there is 2.5 mm of slack, so the cell can be lowered straight down. `design_report` sweeps that vertical drop against every chassis collider **and the compressed plunger**. It also records that the extended plunger blocks the same drop, so the spring has to be pressed.
-- **Spring.** A prismatic joint per slot. Its frame is rotated so that +joint always compresses the spring, with limits [0, travel]. The implicit drive targets 0. A seated cell compresses it by `spring_preload_m` (1.5 mm), which pushes the cell against the fixed contact.
-- **Retention after release** comes from gravity, the side walls (the seated cell top sits 1 mm below the rim), and the spring preload. No lip, weld, or teleport holds the cell.
-- **Secured remote.** The spawner passes `ArticulationRootPropertiesCfg(fix_root_link=True)`, so Isaac Lab fixes the articulation root to the world at the marked pose. The `remote_moved` failure stays, but it should fire only if the fixture breaks.
-- **Masses.** The USDA sets the chassis to 0.080 kg and each spring pad to 0.002 kg. The remote's spawner passes `mass_props=None` (`physics_props.remote_physics` sets `mass_kg: None`), so those masses are kept. Friction and restitution are now USD physics materials bound with `material:binding:physics`. `physics_material=` was dropped from `UsdFileCfg`: it is a procedural-shape config field, not a file-spawner field.
-- **Joint relationships.** `physics:body0/body1` are sibling-relative (`<../chassis>`, `<../slot_x_plunger_link>`). A test parses the generated USDA and resolves both relationships to existing prims. It also checks with `pxr` when that module is installed; it was not installed here.
+- **Fixture.** Authored like the YAM asset: `chassis` is the root rigid body with `PhysicsArticulationRootAPI`; `root_joint` (`PhysicsFixedJoint`) goes from the enclosing `remote` Xform (not a rigid body, so the world) to `chassis`. The spawner no longer requests `fix_root_link`. Plunger links are rigid bodies nested under `chassis` (YAM nests its links the same way). Composed under `/World/envs/env_0/remote`: one articulation root, on the chassis; every joint target resolves; three rigid bodies.
+- **Appearance** (likeness of ASIN B07T4N7NTX). MEASURED from the listing: 23.5 × 4.8 × 2.4 cm, black ABS, two AAA. ESTIMATED: everything about the bay (the front photo shows no compartment), the 46 mm bay-block width and 22 mm height, edge fillet 4 mm, end radius 12 mm.
+  - Visual shell: one mesh, tapered from 48 mm at the IR nose to 46 mm at the bay, rounded ends, filleted top edges, the two slots cut out of the top with their own walls and floors. Black ABS material.
+  - Positive contacts: nickel plates that *are* each slot's end wall at the fixed contact face (no overlay). Plunger pads nickel; a conical steel coil rides on each plunger link.
+  - Moulded `+`/`-` marks on each slot floor and on the spine beside each slot's ends; every bar crosses its surface (no coplanar faces).
+  - Colliders are `purpose = "guide"` (not rendered): boxes around the bay, and convex-hull prisms that follow the shell's tapered, rounded plan outline at the nose and handle ends (≤ 64 hull vertices each).
+- **Spring.** Prismatic joint per slot, frame rotated so +joint compresses; limits [0, 4 mm]; drive target 0; seated preload 1.5 mm → 0.33 N at the configured 220 N/m. These are design numbers, not measured.
+- **Masses.** Chassis 0.080 kg, each pad 0.002 kg, authored in the USDA; the spawner passes `mass_props=None`.
+- **Unknown readings fail closed.** Missing gripper names → hold unknown → not released. Missing plunger joint → `spring_contact = None` (reported as `spring_unknown`) → no insertion credit; the authored rest pose is never substituted.
+- **Mounting.** Bases at (0.27, ±0.20, 0.003): on the tabletop, 7 cm inside the near edge. `validate` checks base z, base XY inside the footprint with a 5 cm margin, and that the bay and both cells are 0.20–0.45 m from the nearer base (they are 0.32–0.34 m). Objects moved to x = 0.57 accordingly.
+- **Scoring** (unchanged): interchangeable cells with one-to-one slot assignment; seated = axial ±1.5 mm, radial ≤ 2 mm, polarity, spring contact, released, held for 1 s; orientation-aware lift. **Holding is a geometric proxy** (gripper body distance + finger closure), not contact. **Damage is a 30 N contact-force proxy**, not visible damage.
 
-## Scoring
+## Unverified (needs the server)
 
-- **Interchangeable cells.** Each cell is measured against every slot. Each step, the scorer picks a one-to-one match with the most seated pairs, and on a tie it keeps the previous occupant. Each slot has its own retention timer, which restarts when its occupant changes. Polarity is checked against the slot the cell is in.
-- **Seated** means the axial offset from the seat is within ±`axial_tolerance_m` (bounds on both sides), the cell is within `seat_radial_max_m` of the slot's seated axis, its polarity is right on both the axis and the flag, it has geometric spring contact against the live plunger joint pose, and it is released. It must hold that state for `retention_window_s`.
-- **Lift** uses the cylinder's lowest point for its orientation: `z - (r·sqrt(1-a_z²) + h·|a_z|)`. A cell standing on its end does not count as lifted.
-- **Holding is a geometric proxy:** the `gripper` body is within `grasp_radius_m` and the fingers are shut. It is not a contact test (`tip_left`/`tip_right` would be the bodies for one). If either arm's names are missing, holding is **unknown**, and unknown counts as not released, so no slot can earn credit.
-- **Damage is a contact-force proxy** (`damage_force_proxy_n`, 30 N). It is not a model of visible damage.
-- Off-table, remote motion, and the damage proxy latch and force 0. `never_lifted` also forces 0, but it is not an early termination.
+Run `tools/physics_check.py` (see INTEGRATION.md). Until then, all of these are open:
 
-## Still unverified (needs the GPU run)
-
-- Whether `fix_root_link=True` is accepted on this build's `UsdFileCfg.articulation_props`, and whether the fixed joint lands on `chassis`.
-- PhysX insertion and retention with these clearances and contact offsets. Also whether the spring drive reaches 1.5 mm compression without jitter, and the drive gains in general.
-- Contact-sensor prim paths (`{ENV_REGEX_NS}/battery_a`, `.../remote/chassis`, `.../remote/slot_*_plunger_link`).
-- Launcher flags `--output_base_dir`, `--visualizer kit`, and `--livestream 1` against the installed `policy_runner.py` / AppLauncher. If `--output_base_dir` is rejected, drop it from `build_argv`.
-- Reachability. The robot bases at x = -0.05 sit 0.25 m behind the table's measured near edge (x = 0.1986). The remote is at x = 0.50.
-- Camera frames.
+- Whether the fixed-base authoring starts, and the remote stays put (`remote_displacement_mm` ≈ 0, `is_fixed_base` true).
+- Physical insertion into both slots and retention after release; actual spring compression and force at rest; jitter; behavior under a small lateral kick; that an upward pull removes the cell (nothing welds it); that a reversed cell is not counted.
+- Contact-sensor prim paths (`.../remote/chassis`, `.../remote/chassis/slot_*_plunger_link`).
+- YAM base-link footprint and the arm's facing direction. The probe and `physics_check.py` now report the base bounds counting only geometry owned by the base body. At the old chess placement the arm at home spanned roughly 0.27 m behind the base, so the arm may overhang the near edge; a render will show which way it faces.
+- Rendered appearance against the reference photo, and the collision overlay.
+- Camera frames; `--capture-dir` output.

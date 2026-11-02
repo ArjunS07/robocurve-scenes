@@ -19,6 +19,8 @@ import math
 from dataclasses import dataclass
 from pathlib import Path
 
+from my_package.assets.remote_shell import MeshData, ShellSpec, SlotHole, build_shell, coil_spring, plan_half_width
+from my_package.assets.remote_shell import polarity_marks as shell_polarity_marks
 from my_package.scoring.config import (
     BatteryInsertionConfig,
     SlotSpec,
@@ -48,7 +50,7 @@ class BatteryMeasure:
     radial_offset_m: float
     positive_axis_xyz: tuple[float, float, float]
     polarity_angle_deg: float
-    spring_contact: bool
+    spring_contact: bool | None
     local_position_xyz: tuple[float, float, float]
 
 
@@ -140,68 +142,75 @@ def static_boxes(cfg: BatteryInsertionConfig) -> tuple[Box, ...]:
     return tuple(boxes)
 
 
-def polarity_marks(cfg: BatteryInsertionConfig) -> tuple[Box, ...]:
-    """Visual marks on the rim. Red over the fixed (+) contact, black past the spring (-)."""
+def shell_spec(cfg: BatteryInsertionConfig) -> ShellSpec:
     compartment = cfg.compartment
-    outer_z = compartment.size_xyz[2] / 2.0
-    mark_z = outer_z + 0.0004
+    return ShellSpec(
+        nose_x=compartment.front_face_x - compartment.silhouette_length_m,
+        front_x=compartment.front_face_x,
+        nose_half_width=compartment.shell_nose_half_width_m,
+        bay_half_width=compartment.size_xyz[1] / 2.0,
+        half_height=compartment.size_xyz[2] / 2.0,
+        edge_fillet=compartment.shell_edge_fillet_m,
+        end_radius=compartment.shell_end_radius_m,
+        floor_z=compartment.floor_z_m,
+        taper_end_x=compartment.rear_face_x,
+    )
+
+
+def slot_holes(cfg: BatteryInsertionConfig) -> tuple[SlotHole, ...]:
+    """Open length of each slot: from the fixed + contact face to the bay end at the spring."""
     bay_min, bay_max = bay_x_bounds(cfg)
-    marks: list[Box] = []
+    holes = []
+    for slot in active_slots(cfg):
+        face = fixed_contact_x(cfg, slot)
+        ymin, ymax = slot_y_bounds(slot, cfg.compartment.channel_y_half)
+        if spring_side(slot) > 0.0:
+            holes.append(SlotHole(slot.name, face, bay_max, ymin, ymax, contact_at_max_x=False))
+        else:
+            holes.append(SlotHole(slot.name, bay_min, face, ymin, ymax, contact_at_max_x=True))
+    return tuple(holes)
+
+
+def visual_meshes(cfg: BatteryInsertionConfig) -> dict[str, MeshData]:
+    """Shell, + contact plates, and moulded polarity marks, in the remote frame."""
+    spec = shell_spec(cfg)
+    holes = slot_holes(cfg)
+    shell, contacts = build_shell(spec, holes)
+    plus_x, minus_x, spine = {}, {}, []
     for slot in active_slots(cfg):
         side = spring_side(slot)
         face = fixed_contact_x(cfg, slot)
-        bay_end_fixed = bay_min if side > 0.0 else bay_max
-        bay_end_spring = bay_max if side > 0.0 else bay_min
-        positive_x = 0.5 * (face + bay_end_fixed)
-        negative_x = bay_end_spring + side * 0.004
-        for tag, x, color in (("positive", positive_x, (0.75, 0.08, 0.08)), ("negative", negative_x, (0.08, 0.08, 0.08))):
-            marks.append(
-                _box(
-                    f"{slot.name}_{tag}_mark",
-                    (x - 0.003, x + 0.003, slot.center_y_m - 0.003, slot.center_y_m + 0.003, mark_z, mark_z + 0.0004),
-                    color,
-                    collision=False,
-                )
-            )
-    return tuple(marks)
+        plus_x[slot.name] = face + side * 0.007
+        minus_x[slot.name] = cfg.compartment.seat_center_x + side * 0.012
+        # On the spine between the slots, beside each slot's ends, so the marks stay visible
+        # with a cell seated. Offset toward the slot they describe.
+        y = 0.003 if slot.center_y_m > 0.0 else -0.003
+        spine.append((face + side * 0.004, y, True))
+        spine.append((cfg.compartment.seat_center_x + side * 0.018, y, False))
+    marks = shell_polarity_marks(holes, cfg.compartment.floor_z_m, spec.half_height, plus_x, minus_x, spine)
+    return {"shell": shell, "contacts": contacts, "marks": marks}
 
 
-def likeness_marks(cfg: BatteryInsertionConfig) -> tuple[Box, ...]:
-    """Visual cues for a black two-AAA wand. They do not collide.
+def end_collider_outlines(cfg: BatteryInsertionConfig) -> dict[str, list[tuple[float, float]]]:
+    """Plan outlines of the convex nose and handle-end colliders (they follow the shell)."""
+    spec = shell_spec(cfg)
+    bay_min, bay_max = bay_x_bounds(cfg)
 
-    The button face is against the table, so the overhead view shows the back
-    and the open bay. Side keys and the nose IR window are only there so the
-    profile reads as that kind of remote. Positions are provisional.
-    """
-    compartment = cfg.compartment
-    nose = compartment.front_face_x - compartment.silhouette_length_m
-    rear = compartment.rear_face_x
-    outer_y = compartment.size_xyz[1] / 2.0
-    span = rear - nose
-    marks = [
-        _box(
-            "ir_window",
-            (nose - 0.0008, nose, -0.006, 0.006, -0.003, 0.003),
-            (0.45, 0.08, 0.08),
-            collision=False,
-        )
-    ]
-    for index, fraction in enumerate((0.18, 0.34, 0.50, 0.66, 0.82)):
-        center_x = nose + span * fraction
-        color = (0.55, 0.08, 0.08) if index == 0 else (0.25, 0.25, 0.27)
-        for sign, tag in ((-1.0, "n"), (1.0, "p")):
-            inner = sign * outer_y
-            outer = sign * (outer_y + 0.0008)
-            ymin, ymax = (inner, outer) if inner < outer else (outer, inner)
-            marks.append(
-                _box(
-                    f"side_key_{index}_{tag}",
-                    (center_x - 0.004, center_x + 0.004, ymin, ymax, -0.006, 0.006),
-                    color,
-                    collision=False,
-                )
-            )
-    return tuple(marks)
+    def outline(x0: float, x1: float, rounded_at_start: bool) -> list[tuple[float, float]]:
+        r = spec.end_radius
+        if rounded_at_start:
+            xs = [x0 + r * (1.0 - math.cos(0.5 * math.pi * k / 8)) for k in range(9)] + [spec.taper_end_x, x1]
+        else:
+            xs = [x0] + [x1 - r * (1.0 - math.cos(0.5 * math.pi * k / 8)) for k in range(8, -1, -1)]
+        xs = sorted(set(round(x, 9) for x in xs if x0 - 1e-12 <= x <= x1 + 1e-12))
+        lower = [(x, -plan_half_width(spec, x)) for x in xs]
+        upper = [(x, plan_half_width(spec, x)) for x in reversed(xs)]
+        return lower + upper
+
+    return {
+        "nose_collider": outline(spec.nose_x, bay_min, True),
+        "handle_collider": outline(bay_max, spec.front_x, False),
+    }
 
 
 def plunger_box(cfg: BatteryInsertionConfig, slot: SlotSpec, joint_pos_m: float = 0.0) -> Box:
@@ -342,9 +351,13 @@ def measure_battery(
     battery_rotation_xyzw: tuple[float, float, float, float],
     remote_position_xyz: tuple[float, float, float],
     remote_rotation_xyzw: tuple[float, float, float, float],
-    plunger_joint_m: float = 0.0,
+    plunger_joint_m: float | None = 0.0,
 ) -> BatteryMeasure:
-    """Measure one cell against one slot along the slot axis, not with an AABB test."""
+    """Measure one cell against one slot along the slot axis, not with an AABB test.
+
+    ``plunger_joint_m`` of None means the joint could not be read; spring contact is then
+    None (unknown), never a guess from the authored rest pose.
+    """
     from my_package.scoring.math3d import angle_deg, rotate
 
     local = _world_point_to_remote(remote_position_xyz, remote_rotation_xyzw, battery_position_xyz)
@@ -353,15 +366,17 @@ def measure_battery(
     required_world = rotate(remote_rotation_xyzw, slot.required_axis_xyz)
     axial = local[0] - cfg.compartment.seat_center_x
     radial = math.hypot(local[1] - slot.center_y_m, local[2] - rest_center_z(cfg))
-    plunger = plunger_box(cfg, slot, plunger_joint_m)
-    contact = spring_contacts_plunger(
-        local,
-        positive_local,
-        cfg.battery.diameter_m / 2.0,
-        cfg.battery.length_m / 2.0,
-        plunger,
-        cfg.compartment.spring_contact_distance_m,
-    )
+    if plunger_joint_m is None:
+        contact = None
+    else:
+        contact = spring_contacts_plunger(
+            local,
+            positive_local,
+            cfg.battery.diameter_m / 2.0,
+            cfg.battery.length_m / 2.0,
+            plunger_box(cfg, slot, plunger_joint_m),
+            cfg.compartment.spring_contact_distance_m,
+        )
     return BatteryMeasure(
         axial_offset_m=axial,
         radial_offset_m=radial,
@@ -413,8 +428,20 @@ def design_report(cfg: BatteryInsertionConfig) -> dict:
         problems.append("silhouette_length_m must be longer than the battery bay")
     if not nose < compartment.rear_face_x:
         problems.append("the nose must sit entirely past the rear face")
-    if abs(compartment.size_xyz[1] / 2.0 - 0.025) > 1e-9 or abs(compartment.size_xyz[2] / 2.0 - 0.011) > 1e-9:
-        problems.append("this shell builder expects the provisional 0.050 by 0.022 remote cross-section")
+    outer_y = compartment.size_xyz[1] / 2.0
+    slot_reach = max(abs(slot.center_y_m) + compartment.channel_y_half for slot in active_slots(cfg))
+    if outer_y - slot_reach < 0.003:
+        problems.append(f"outer rail is {outer_y - slot_reach:.4f} m wide; need at least 0.003 m")
+    if slot_reach >= outer_y - compartment.shell_edge_fillet_m:
+        problems.append("the top-edge fillet reaches into a slot opening")
+    if compartment.shell_nose_half_width_m < outer_y:
+        problems.append("the shell must not be narrower at the nose than at the bay")
+    if not 0.0 < compartment.shell_end_radius_m < outer_y:
+        problems.append("shell_end_radius_m must be positive and smaller than the half width")
+    if 2.0 * compartment.size_xyz[1] / 2.0 > 0.048 + 1e-9:
+        problems.append("the bay block is wider than the listed 48 mm remote")
+    if compartment.size_xyz[2] > 0.024 + 1e-9:
+        problems.append("the bay block is taller than the listed 24 mm remote")
     if not 0.0 < compartment.spring_preload_m < compartment.plunger_travel_m:
         problems.append("spring_preload_m must be positive and smaller than plunger_travel_m")
     plunger_z = compartment.plunger_size_xyz[2] / 2.0
@@ -513,13 +540,15 @@ def _fmt(value: float) -> str:
     return f"{value:.8f}".rstrip("0").rstrip(".")
 
 
-def _cube(box: Box, collision: bool, contact_offset_m: float = 0.0003) -> str:
+def _cube(box: Box, collision: bool, contact_offset_m: float = 0.0003, guide: bool = False) -> str:
     schemas = 'prepend apiSchemas = ["PhysicsCollisionAPI"]' if collision else ""
     header = f"    def Cube \"{box.name}\" (\n        {schemas}\n    )" if collision else f"    def Cube \"{box.name}\""
     color = ", ".join(_fmt(channel) for channel in box.color)
     contact = ""
     if collision:
         contact = f"\n        float physxCollision:contactOffset = {_fmt(contact_offset_m)}"
+        if guide:
+            contact += '\n        uniform token purpose = "guide"'
     return f"""{header}
     {{
         double size = 1
@@ -557,39 +586,156 @@ def write_geometry(cfg: BatteryInsertionConfig, directory: str | Path) -> dict[s
     return {"remote": remote_path, "battery": battery_path, "marks": marks_path}
 
 
+def _mesh_usda(name: str, mesh: MeshData, indent: str, extra: str = "", schemas: tuple[str, ...] = ()) -> str:
+    points = ", ".join(f"({_fmt(x)}, {_fmt(y)}, {_fmt(z)})" for x, y, z in mesh.points)
+    indices = ", ".join(f"{a}, {b}, {c}" for a, b, c in mesh.triangles)
+    counts = ", ".join("3" for _ in mesh.triangles)
+    header = f'{indent}def Mesh "{name}"'
+    if schemas:
+        header += f' (\n{indent}    prepend apiSchemas = [{", ".join(chr(34) + item + chr(34) for item in schemas)}]\n{indent})'
+    return f"""{header}
+{indent}{{
+{indent}    uniform token subdivisionScheme = "none"
+{indent}    int[] faceVertexCounts = [{counts}]
+{indent}    int[] faceVertexIndices = [{indices}]
+{indent}    point3f[] points = [{points}]{extra}
+{indent}}}"""
+
+
+def _prism_mesh(outline: list[tuple[float, float]], z0: float, z1: float) -> MeshData:
+    """Closed convex prism over a counter-clockwise outline."""
+    mesh = MeshData()
+    n = len(outline)
+    bottom = [mesh.add_point((x, y, z0)) for x, y in outline]
+    top = [mesh.add_point((x, y, z1)) for x, y in outline]
+    for k in range(n):
+        mesh.quad(bottom[k], bottom[(k + 1) % n], top[(k + 1) % n], top[k])
+    for k in range(1, n - 1):
+        mesh.triangles.append((bottom[0], bottom[k + 1], bottom[k]))
+        mesh.triangles.append((top[0], top[k], top[k + 1]))
+    return mesh
+
+
+# Visual materials (UsdPreviewSurface). Black ABS, nickel contacts, slightly lighter moulded marks.
+_LOOKS = {
+    "black_abs": {"color": (0.018, 0.018, 0.02), "roughness": 0.38, "metallic": 0.0},
+    "nickel": {"color": (0.72, 0.71, 0.68), "roughness": 0.22, "metallic": 1.0},
+    "moulded_mark": {"color": (0.30, 0.30, 0.31), "roughness": 0.55, "metallic": 0.0},
+    "spring_steel": {"color": (0.62, 0.62, 0.64), "roughness": 0.3, "metallic": 1.0},
+}
+# Collider colours, only seen when a collision overlay makes guide prims visible.
+_COLLIDER_COLOR = (0.95, 0.4, 0.1)
+
+
+def _looks_usda(root: str, indent: str = "    ") -> str:
+    blocks = []
+    for name, look in _LOOKS.items():
+        color = ", ".join(_fmt(channel) for channel in look["color"])
+        blocks.append(
+            f"""{indent}    def Material "{name}"
+{indent}    {{
+{indent}        token outputs:surface.connect = </{root}/Looks/{name}/surface.outputs:surface>
+{indent}        def Shader "surface"
+{indent}        {{
+{indent}            uniform token info:id = "UsdPreviewSurface"
+{indent}            color3f inputs:diffuseColor = ({color})
+{indent}            float inputs:roughness = {_fmt(look["roughness"])}
+{indent}            float inputs:metallic = {_fmt(look["metallic"])}
+{indent}            token outputs:surface
+{indent}        }}
+{indent}    }}"""
+        )
+    return f'{indent}def Scope "Looks"\n{indent}{{\n' + "\n".join(blocks) + f"\n{indent}}}"
+
+
+def _bound(look: str, color: tuple[float, float, float]) -> str:
+    rgb = ", ".join(_fmt(channel) for channel in color)
+    return f"""
+        rel material:binding = </remote/Looks/{look}>
+        color3f[] primvars:displayColor = [({rgb})]"""
+
+
 def _remote_usda(cfg: BatteryInsertionConfig, numbers: dict) -> str:
+    """Fixed-base articulation, authored like the measured YAM asset.
+
+    ``chassis`` is the root rigid body and carries ``PhysicsArticulationRootAPI``.
+    ``root_joint`` is a ``PhysicsFixedJoint`` from the enclosing ``remote`` Xform
+    (not a rigid body, so the world) to the chassis; that is the secured fixture,
+    and it does not rely on Isaac Lab's ``fix_root_link``. The plunger links are
+    rigid bodies nested under the chassis, as YAM nests its links.
+    """
     compartment = cfg.compartment
     offset = compartment.contact_offset_m
-    cubes = "\n".join(
-        _cube(box, box.collision, offset)
-        for box in (*static_boxes(cfg), *polarity_marks(cfg), *likeness_marks(cfg))
-    )
+    authored_boxes = [box for box in static_boxes(cfg) if box.name not in ("nose", "back_cap", "front_cap")]
+    colliders = [_cube(box, box.collision, offset, guide=True) for box in authored_boxes]
+    half_z = compartment.size_xyz[2] / 2.0
+    collider_extra = f"""
+        uniform token physics:approximation = "convexHull"
+        float physxCollision:contactOffset = {_fmt(offset)}
+        uniform token purpose = "guide"
+        color3f[] primvars:displayColor = [({", ".join(_fmt(c) for c in _COLLIDER_COLOR)})]"""
+    for name, outline in end_collider_outlines(cfg).items():
+        colliders.append(
+            _mesh_usda(
+                name,
+                _prism_mesh(outline, -half_z, half_z),
+                "    ",
+                collider_extra,
+                ("PhysicsCollisionAPI", "PhysicsMeshCollisionAPI", "PhysxCollisionAPI"),
+            )
+        )
+    visuals = visual_meshes(cfg)
+    visual_blocks = [
+        _mesh_usda("shell", visuals["shell"], "    ", _bound("black_abs", _LOOKS["black_abs"]["color"]), ("MaterialBindingAPI",)),
+        _mesh_usda("positive_contacts", visuals["contacts"], "    ", _bound("nickel", _LOOKS["nickel"]["color"]), ("MaterialBindingAPI",)),
+        _mesh_usda("polarity_marks", visuals["marks"], "    ", _bound("moulded_mark", _LOOKS["moulded_mark"]["color"]), ("MaterialBindingAPI",)),
+    ]
+    spec = shell_spec(cfg)
+    ir = MeshData()
+    ir.box((spec.nose_x, 0.0, 0.0), (0.0008, 0.010, 0.006))
+    visual_blocks.append(_mesh_usda("ir_window", ir, "    ", "\n        color3f[] primvars:displayColor = [(0.35, 0.03, 0.03)]"))
+    chassis_body = "\n".join(colliders + visual_blocks).replace(chr(10), chr(10) + "    ")
+
+    bay_min, bay_max = bay_x_bounds(cfg)
     plunger_blocks = []
     joint_blocks = []
     for slot in active_slots(cfg):
         plunger = plunger_box(cfg, slot, 0.0)
         link = plunger_link_name(slot)
         joint = plunger_joint_name(slot)
+        side = spring_side(slot)
         # Rotate the joint frame so +joint always compresses the spring, on either end of the bay.
-        rot = "(1, 0, 0, 0)" if spring_side(slot) > 0.0 else "(0, 0, 0, 1)"
-        pad = _cube(Box(joint + "_pad", (0.0, 0.0, 0.0), plunger.size, True, plunger.color), True, offset)
+        rot = "(1, 0, 0, 0)" if side > 0.0 else "(0, 0, 0, 1)"
+        pad = _cube(Box(joint + "_pad", (0.0, 0.0, 0.0), plunger.size, True, _LOOKS["nickel"]["color"]), True, offset)
+        pad = pad.replace("    }", "        rel material:binding = </remote/Looks/nickel>\n    }", 1).replace(
+            'prepend apiSchemas = ["PhysicsCollisionAPI"]', 'prepend apiSchemas = ["PhysicsCollisionAPI", "MaterialBindingAPI"]'
+        )
+        # Conical coil from the pad's back face to the bay end wall (visual; it rides on the link).
+        bay_end = bay_max if side > 0.0 else bay_min
+        coil = coil_spring(
+            side * plunger.size[0] / 2.0, bay_end - plunger.center[0], 0.0026, 0.0040, 0.00035, 4.0
+        )
+        coil_usda = _mesh_usda(
+            "coil", coil, "        ", _bound("spring_steel", _LOOKS["spring_steel"]["color"]), ("MaterialBindingAPI",)
+        )
         plunger_blocks.append(
-            f"""    def Xform "{link}" (
-        prepend apiSchemas = ["PhysicsRigidBodyAPI", "PhysicsMassAPI", "MaterialBindingAPI"]
-    )
-    {{
-        float physics:mass = {_fmt(compartment.plunger_mass_kg)}
-        rel material:binding:physics = </remote/physics_material>
-        double3 xformOp:translate = ({_fmt(plunger.center[0])}, {_fmt(plunger.center[1])}, {_fmt(plunger.center[2])})
-        uniform token[] xformOpOrder = ["xformOp:translate"]
-{pad.replace("    def", "        def")}
-    }}"""
+            f"""        def Xform "{link}" (
+            prepend apiSchemas = ["PhysicsRigidBodyAPI", "PhysicsMassAPI", "MaterialBindingAPI"]
+        )
+        {{
+            float physics:mass = {_fmt(compartment.plunger_mass_kg)}
+            rel material:binding:physics = </remote/physics_material>
+            double3 xformOp:translate = ({_fmt(plunger.center[0])}, {_fmt(plunger.center[1])}, {_fmt(plunger.center[2])})
+            uniform token[] xformOpOrder = ["xformOp:translate"]
+{pad.replace(chr(10), chr(10) + "        ").replace("    def", "            def", 1)}
+{coil_usda.replace(chr(10), chr(10) + "    ").replace("        def", "            def", 1)}
+        }}"""
         )
         joint_blocks.append(
             f"""    def PhysicsPrismaticJoint "{joint}"
     {{
         rel physics:body0 = <../chassis>
-        rel physics:body1 = <../{link}>
+        rel physics:body1 = <../chassis/{link}>
         uniform token physics:axis = "X"
         float physics:lowerLimit = 0
         float physics:upperLimit = {_fmt(compartment.plunger_travel_m)}
@@ -602,7 +748,8 @@ def _remote_usda(cfg: BatteryInsertionConfig, numbers: dict) -> str:
         )
     header = "\n".join(
         [
-            "# Provisional procedural TV-remote compartment. Not measured CAD.",
+            "# Face-down two-AAA TV remote, likeness of ASIN B07T4N7NTX. Not measured CAD.",
+            "# Listing: 23.5 x 4.8 x 2.4 cm, black ABS, two AAA. Bay geometry is ESTIMATED.",
             f"# channel_width_m = {numbers['channel_width_m']}",
             f"# lateral_clearance_m = {numbers['lateral_clearance_m']}",
             f"# seated_rim_margin_m = {numbers['seated_rim_margin_m']}",
@@ -613,8 +760,9 @@ def _remote_usda(cfg: BatteryInsertionConfig, numbers: dict) -> str:
             f"# plunger_travel_m = {compartment.plunger_travel_m}",
             f"# silhouette_length_m = {numbers['silhouette_length_m']}",
             "# Cover removed: the bay is open from above. The spring is at each slot's negative end.",
+            "# Fixed base: root_joint (PhysicsFixedJoint) anchors the chassis, which is the articulation root.",
+            "# Colliders are guide-purpose (not rendered); the shell, contacts, marks, and coils are visual only.",
             "# Plungers are prismatic joints; +joint compresses the spring. The battery is not parented here.",
-            "# The remote is fixed to the world by the spawner (fix_root_link), not by a joint in this file.",
             "# single_slot omits slot_b. Joint 0 is the extended pose authored below.",
         ]
     )
@@ -627,29 +775,39 @@ def _remote_usda(cfg: BatteryInsertionConfig, numbers: dict) -> str:
     metersPerUnit = 1
     kilogramsPerUnit = 1
     upAxis = "Z"
-    doc = "Provisional battery compartment"
+    doc = "Face-down two-AAA TV remote with the battery cover removed"
 )
 
 {header}
-def Xform "remote" (
-    prepend apiSchemas = ["PhysicsArticulationRootAPI"]
-)
+def Xform "remote"
 {{
 {material}
+{_looks_usda("remote")}
     def Xform "chassis" (
-        prepend apiSchemas = ["PhysicsRigidBodyAPI", "PhysicsMassAPI", "PhysxRigidBodyAPI", "MaterialBindingAPI"]
+        prepend apiSchemas = ["PhysicsRigidBodyAPI", "PhysicsMassAPI", "PhysxRigidBodyAPI", "MaterialBindingAPI", "PhysicsArticulationRootAPI", "PhysxArticulationAPI"]
     )
     {{
         float physics:mass = {_fmt(compartment.mass_kg)}
         rel material:binding:physics = </remote/physics_material>
         int physxRigidBody:solverPositionIterationCount = {compartment.solver_position_iterations}
         int physxRigidBody:solverVelocityIterationCount = {compartment.solver_velocity_iterations}
+        bool physxArticulation:enabledSelfCollisions = false
         quatf xformOp:orient = (1, 0, 0, 0)
         double3 xformOp:translate = (0, 0, 0)
         uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:orient"]
-{cubes.replace(chr(10), chr(10) + "    ")}
-    }}
+{chassis_body}
 {chr(10).join(plunger_blocks)}
+    }}
+    def PhysicsFixedJoint "root_joint"
+    {{
+        rel physics:body0 = <..>
+        rel physics:body1 = <../chassis>
+        point3f physics:localPos0 = (0, 0, 0)
+        point3f physics:localPos1 = (0, 0, 0)
+        quatf physics:localRot0 = (1, 0, 0, 0)
+        quatf physics:localRot1 = (1, 0, 0, 0)
+        bool physics:jointEnabled = true
+    }}
 {chr(10).join(joint_blocks)}
 }}
 """

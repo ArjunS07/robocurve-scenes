@@ -125,7 +125,9 @@ class GeometryTests(unittest.TestCase):
             text = paths["remote"].read_text()
         self.assertIn("slot_a_plunger", text)
         self.assertNotIn("slot_b_plunger", text)
-        self.assertNotIn("PhysicsFixedJoint", text)
+        # The only fixed joint is the fixture anchor; nothing welds a cell.
+        self.assertEqual(text.count("def PhysicsFixedJoint"), 1)
+        self.assertIn('def PhysicsFixedJoint "root_joint"', text)
 
     def test_dual_usda_has_both_plungers_and_no_weld(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -133,12 +135,14 @@ class GeometryTests(unittest.TestCase):
             remote = paths["remote"].read_text()
             battery = paths["battery"].read_text()
             marks = paths["marks"].read_text()
-        self.assertIn('def Cube "nose"', remote)
-        self.assertIn('def Cube "ir_window"', remote)
-        self.assertNotIn('def Cube "ceiling"', remote)
+        self.assertIn('def Mesh "nose_collider"', remote)
+        self.assertIn('def Mesh "handle_collider"', remote)
+        self.assertIn('def Mesh "shell"', remote)
+        self.assertIn('def Mesh "ir_window"', remote)
+        self.assertNotIn('"ceiling"', remote)
         self.assertIn('def PhysicsPrismaticJoint "slot_a_plunger"', remote)
         self.assertIn('def PhysicsPrismaticJoint "slot_b_plunger"', remote)
-        self.assertNotIn("PhysicsFixedJoint", remote)
+        self.assertEqual(remote.count("def PhysicsFixedJoint"), 1)
         self.assertNotIn("PhysicsFixedJoint", battery)
         self.assertIn('def Cylinder "body"', battery)
         self.assertIn("PhysicsCollisionAPI", battery)
@@ -160,9 +164,13 @@ class GeometryTests(unittest.TestCase):
                 self.assertIn(joint_path, prims)
                 self.assertEqual(rels["body0"], "../chassis")
                 self.assertEqual(_resolve(joint_path, rels["body0"]), "/remote/chassis")
-                self.assertEqual(_resolve(joint_path, rels["body1"]), f"/remote/{name}_link")
+                # Plunger links nest under the chassis, like YAM's links under its base.
+                self.assertEqual(_resolve(joint_path, rels["body1"]), f"/remote/chassis/{name}_link")
                 for body in rels.values():
                     self.assertIn(_resolve(joint_path, body), prims, f"{name} -> {body}")
+            anchor = dict(re.findall(r"rel physics:(body[01]) = <([^>]+)>", text.split('def PhysicsFixedJoint "root_joint"', 1)[1].split("}", 1)[0]))
+            self.assertEqual(_resolve("/remote/root_joint", anchor["body0"]), "/remote")
+            self.assertEqual(_resolve("/remote/root_joint", anchor["body1"]), "/remote/chassis")
             try:
                 usd = importlib.import_module("pxr.Usd")
                 physics = importlib.import_module("pxr.UsdPhysics")
@@ -187,17 +195,56 @@ class GeometryTests(unittest.TestCase):
         self.assertIn("PhysicsMaterialAPI", text)
         self.assertIn("rel material:binding:physics = </remote/physics_material>", text)
 
-    def test_spawner_keeps_usd_masses_and_fixes_the_remote(self):
+    def test_spawner_keeps_usd_masses_and_does_not_request_fix_root_link(self):
         remote = remote_physics(self.cfg)
         self.assertIsNone(remote["mass_kg"])
-        self.assertTrue(remote["fix_root_link"])
+        self.assertNotIn("fix_root_link", remote)
         cell = battery_physics(self.cfg)
         self.assertAlmostEqual(cell["mass_kg"], self.cfg.battery.mass_kg)
-        self.assertFalse(cell["fix_root_link"])
         spawn = (Path(__file__).resolve().parents[1] / "my_package" / "assets" / "spawn.py").read_text()
         self.assertIn("mass_props=None if mass is None", spawn)
-        self.assertIn("fix_root_link=True", spawn)
+        # The server's Isaac Lab cannot apply fix_root_link to this hierarchy; the USDA anchors it.
+        self.assertNotIn("fix_root_link=True", spawn)
+        self.assertNotIn("ArticulationRootPropertiesCfg", spawn)
         self.assertNotIn("physics_material=", spawn)
+
+    def test_fixed_base_is_authored_like_the_yam_asset(self):
+        """One articulation root, on the chassis rigid body, anchored by root_joint."""
+        with tempfile.TemporaryDirectory() as directory:
+            text = write_geometry(self.cfg, directory)["remote"].read_text()
+        self.assertEqual(text.count("PhysicsArticulationRootAPI"), 1)
+        chassis_schemas = text.split('def Xform "chassis" (', 1)[1].split(")", 1)[0]
+        self.assertIn("PhysicsArticulationRootAPI", chassis_schemas)
+        self.assertIn("PhysicsRigidBodyAPI", chassis_schemas)
+        remote_header = text.split('def Xform "remote"', 1)[1].split("{", 1)[0]
+        self.assertNotIn("apiSchemas", remote_header)
+        # Rigid bodies: the chassis and one link per plunger, nothing else.
+        self.assertEqual(len(re.findall(r'"PhysicsRigidBodyAPI"', text)), 1 + len(self.cfg.compartment.slots))
+
+    def test_composed_usd_resolves_when_referenced_under_an_env(self):
+        """Same structure check through real USD composition, when pxr is installed."""
+        try:
+            usd = importlib.import_module("pxr.Usd")
+            physics = importlib.import_module("pxr.UsdPhysics")
+            shade = importlib.import_module("pxr.UsdShade")
+        except ImportError:
+            self.skipTest("pxr is not installed here; tools/physics_check.py exercises this on the server")
+        with tempfile.TemporaryDirectory() as directory:
+            path = write_geometry(self.cfg, directory)["remote"]
+            stage = usd.Stage.CreateInMemory()
+            stage.DefinePrim("/World/envs/env_0/remote").GetReferences().AddReference(str(path))
+            roots = [p for p in stage.Traverse() if p.HasAPI(physics.ArticulationRootAPI)]
+            self.assertEqual([str(p.GetPath()) for p in roots], ["/World/envs/env_0/remote/chassis"])
+            self.assertTrue(roots[0].HasAPI(physics.RigidBodyAPI))
+            for prim in stage.Traverse():
+                if prim.IsA(physics.Joint):
+                    joint = physics.Joint(prim)
+                    for rel in (joint.GetBody0Rel(), joint.GetBody1Rel()):
+                        for target in rel.GetTargets():
+                            self.assertTrue(stage.GetPrimAtPath(target).IsValid(), f"{prim.GetPath()} -> {target}")
+                if prim.GetName() in ("shell", "positive_contacts", "polarity_marks", "coil"):
+                    material, _ = shade.MaterialBindingAPI(prim).ComputeBoundMaterial()
+                    self.assertTrue(material, f"{prim.GetPath()} has no visual material")
 
     def test_tracked_examples_match_the_generator(self):
         generated = Path(__file__).resolve().parents[1] / "my_package" / "assets" / "generated"
@@ -217,6 +264,21 @@ class GeometryTests(unittest.TestCase):
         raised = replace(self.cfg.robot, left_pose=replace(self.cfg.robot.left_pose, position_xyz=(-0.05, 0.22, 0.75)))
         with self.assertRaises(ValueError):
             validate(replace(self.cfg, robot=raised))
+
+    def test_robot_bases_must_stand_over_the_table_footprint(self):
+        """Z equal to the tabletop is not enough: the old x=-0.05 bases hung off the near edge."""
+        off_edge = replace(self.cfg.robot, left_pose=replace(self.cfg.robot.left_pose, position_xyz=(-0.05, 0.22, 0.003)))
+        with self.assertRaisesRegex(ValueError, "not on the tabletop"):
+            validate(replace(self.cfg, robot=off_edge))
+        from my_package.scoring.config import mounting_problems
+
+        self.assertEqual(mounting_problems(self.cfg), [])
+
+    def test_objects_must_be_within_reach_of_a_base(self):
+        far = replace(self.cfg.robot, left_pose=replace(self.cfg.robot.left_pose, position_xyz=(0.27, 0.45, 0.003)),
+                      right_pose=replace(self.cfg.robot.right_pose, position_xyz=(0.27, 0.45, 0.003)))
+        with self.assertRaisesRegex(ValueError, "from the nearer robot base"):
+            validate(replace(self.cfg, robot=far))
 
 
 class ActionMapTests(unittest.TestCase):
@@ -308,6 +370,15 @@ class PackageContractTests(unittest.TestCase):
         self.assertEqual(argv[argv.index("--num_steps") + 1], "1000000")
         self.assertLess(argv.index("--livestream"), command)
         self.assertLess(argv.index("--enable_cameras"), command)
+
+    def test_capture_dir_needs_cameras_and_sets_the_env_var(self):
+        module, _root = self._launcher()
+        parser = module.make_parser()
+        args = parser.parse_args(["--arena-root", "/arena", "--enable-cameras", "--capture-dir", "/tmp/caps"])
+        self.assertEqual(str(args.capture_dir), "/tmp/caps")
+        text = (Path(__file__).resolve().parents[1] / "launch_battery_insertion.py").read_text()
+        self.assertIn('parser.error("--capture-dir needs --enable-cameras")', text)
+        self.assertIn('os.environ["ROBOCURVE_CAPTURE_DIR"]', text)
 
     def test_yaml_names_the_provisional_thresholds(self):
         text = (default_config_path()).read_text()

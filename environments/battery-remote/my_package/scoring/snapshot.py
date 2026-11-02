@@ -21,7 +21,8 @@ class SlotFit:
     axial_offset_m: float
     radial_offset_m: float
     polarity_aligned: bool
-    spring_contact: bool
+    # None means the spring plunger's joint could not be read. That is never contact.
+    spring_contact: bool | None
 
 
 @dataclass(frozen=True)

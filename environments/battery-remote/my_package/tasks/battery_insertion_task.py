@@ -19,7 +19,7 @@ from isaaclab_arena.tasks.task_termination_cfg import TaskTerminationCfg
 from isaaclab_arena.terms.events import reset_all_articulation_joints
 from isaaclab_arena.utils.configclass import make_configclass
 
-from my_package.scoring.config import BatteryInsertionConfig, active_slots, cell_names, plunger_link_name
+from my_package.scoring.config import BatteryInsertionConfig, active_slots, cell_names, plunger_link_path
 from my_package.tasks.sim_bridge import (
     batteries_retained,
     battery_off_table,
@@ -75,12 +75,12 @@ class BatteryInsertionTask(TaskBase):
         if cfg.single_slot:
             description = (
                 "Insert the AAA battery into the open slot of the face-down remote. "
-                "The cover is already off. The positive terminal goes to the red mark, the negative end to the spring."
+                "The cover is already off. The positive terminal goes to the moulded + mark, the negative end to the spring."
             )
         else:
             description = (
                 "Insert both AAA batteries into the face-down remote. The cover is already off. "
-                "Either battery may go in either slot. In each slot the positive terminal goes to the red mark "
+                "Either battery may go in either slot. In each slot the positive terminal goes to the moulded + mark "
                 "and the negative end compresses the spring."
             )
         super().__init__(episode_length_s=cfg.scoring.episode_length_s, task_description=description)
@@ -90,7 +90,7 @@ class BatteryInsertionTask(TaskBase):
         if not self.cfg.scoring.enable_contact_sensors:
             return None
         fields = []
-        plungers = ["{ENV_REGEX_NS}/remote/" + plunger_link_name(slot) for slot in active_slots(self.cfg)]
+        plungers = ["{ENV_REGEX_NS}/remote/" + plunger_link_path(slot) for slot in active_slots(self.cfg)]
         for name in cell_names(self.cfg):
             fields.append(
                 (
@@ -171,4 +171,4 @@ class BatteryInsertionTask(TaskBase):
 
     def get_viewer_cfg(self) -> ViewerCfg:
         # Provisional. The smoke launch uses --visualizer none, so this is unused there.
-        return ViewerCfg(eye=(1.35, -0.9, 0.503), lookat=(0.50, 0.0, 0.033))
+        return ViewerCfg(eye=(1.42, -0.9, 0.503), lookat=(0.57, 0.0, 0.033))

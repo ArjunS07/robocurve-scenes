@@ -132,6 +132,49 @@ def table_info() -> dict:
     return out
 
 
+def _yam_bounds(stage) -> dict:
+    """Bounds in the asset frame at the authored (zero) joint pose.
+
+    ``base`` covers only geometry whose nearest rigid-body ancestor is the base link;
+    the nested link1..link5 bodies live under the base prim and would otherwise make
+    "base" the whole arm. Scenes put the asset root at the base pose, so base min z is
+    where the base bottom sits relative to the tabletop.
+    """
+    from pxr import Usd, UsdGeom, UsdPhysics
+
+    def owner(prim):
+        while prim.IsValid() and not prim.HasAPI(UsdPhysics.RigidBodyAPI):
+            prim = prim.GetParent()
+        return prim
+
+    result: dict = {}
+    root = stage.GetPrimAtPath("/yam")
+    base = stage.GetPrimAtPath("/yam/Geometry/base")
+    for purposes in (("default", "render"), ("default", "render", "proxy", "guide")):
+        cache = UsdGeom.BBoxCache(Usd.TimeCode.Default(), list(purposes))
+        key = "+".join(purposes)
+        entry: dict = {}
+        if root.IsValid():
+            whole = cache.ComputeWorldBound(root).ComputeAlignedRange()
+            entry["robot"] = {"min": [round(v, 5) for v in whole.GetMin()], "max": [round(v, 5) for v in whole.GetMax()]}
+        if base.IsValid():
+            total = None
+            for prim in Usd.PrimRange(base):
+                if not prim.IsA(UsdGeom.Gprim) or owner(prim) != base:
+                    continue
+                part = cache.ComputeWorldBound(prim).ComputeAlignedRange()
+                if part.IsEmpty():
+                    continue
+                total = part if total is None else total.UnionWith(part)
+            entry["base"] = (
+                {"min": [round(v, 5) for v in total.GetMin()], "max": [round(v, 5) for v in total.GetMax()]}
+                if total is not None
+                else "no geometry owned by the base link"
+            )
+        result[key] = entry
+    return result
+
+
 def yam_info() -> dict:
     out: dict = {"path": str(YAM), "exists": YAM.is_file()}
     try:
@@ -158,6 +201,7 @@ def yam_info() -> dict:
                 joints.append(entry)
         out.update(articulation_roots=roots, rigid_bodies=bodies, joints=joints)
         out["gripper_like"] = [b for b in bodies if re.search(r"grip|finger|tcp|ee|hand", b, re.I)]
+        out["yam_base_bounds"] = _yam_bounds(stage)
     except ImportError:
         # USDA is ASCII; fall back to a text scan.
         text = YAM.read_text(errors="ignore")

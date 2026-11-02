@@ -1,10 +1,13 @@
 """USD objects for the compartment and the cells.
 
 Friction and restitution are authored as USD physics materials in the
-generated files. ``physics_material`` is a field of Isaac Lab's procedural
-shape configs, not of ``UsdFileCfg``, so it is not passed here. ``rigid_props``,
-``collision_props``, ``mass_props``, and ``articulation_props`` are fields of
-Isaac Lab's file spawner config.
+generated files, so the spawner does not pass ``physics_material`` (the chess
+scene shows the server's ``UsdFileCfg`` accepts it; it is just not needed).
+
+The remote is a fixed-base articulation in its own USDA (a ``root_joint``
+anchors the chassis, as in the YAM asset). The spawner does not request
+``fix_root_link``: this Isaac Lab build cannot apply it when the articulation
+root is not the first rigid link.
 """
 
 from __future__ import annotations
@@ -51,11 +54,6 @@ class ConfiguredUsdObject(Object):
             collision_props=sim_utils.CollisionPropertiesCfg(contact_offset=physics["contact_offset_m"]),
             # None keeps the USD-authored per-body masses.
             mass_props=None if mass is None else sim_utils.MassPropertiesCfg(mass=mass),
-            articulation_props=(
-                sim_utils.ArticulationRootPropertiesCfg(fix_root_link=True)
-                if physics.get("fix_root_link")
-                else None
-            ),
         )
 
     def _generate_rigid_cfg(self):

@@ -50,6 +50,9 @@ class CompartmentGeometry:
 
     size_xyz: tuple[float, float, float]
     silhouette_length_m: float
+    shell_nose_half_width_m: float
+    shell_edge_fillet_m: float
+    shell_end_radius_m: float
     mass_kg: float
     static_friction: float
     dynamic_friction: float
@@ -175,6 +178,11 @@ def plunger_link_name(slot: SlotSpec) -> str:
     return f"{slot.name}_plunger_link"
 
 
+def plunger_link_path(slot: SlotSpec) -> str:
+    """Path under the remote prim. Plunger links nest under the chassis, like YAM's links."""
+    return f"chassis/{plunger_link_name(slot)}"
+
+
 def battery_pose(cfg: BatteryInsertionConfig, slot_name: str) -> PoseSpec:
     if slot_name == "battery_a":
         return cfg.battery_a_pose
@@ -276,9 +284,7 @@ def validate(cfg: BatteryInsertionConfig) -> None:
     half_height = cfg.compartment.size_xyz[2] / 2.0
     if abs(cfg.remote_pose.position_xyz[2] - (cfg.table.top_z_m + half_height)) > 1e-6:
         problems.append("remote start z must be table top plus half the remote height")
-    for side, pose in (("left", cfg.robot.left_pose), ("right", cfg.robot.right_pose)):
-        if abs(pose.position_xyz[2] - cfg.table.top_z_m) > 1e-6:
-            problems.append(f"robot {side} base z {pose.position_xyz[2]} must equal the table top {cfg.table.top_z_m}")
+    problems.extend(mounting_problems(cfg))
     camera_names = [camera.name for camera in cfg.cameras]
     if camera_names != ["overhead_cam", "front_cam", "side_cam"]:
         problems.append(f"cameras must be overhead_cam, front_cam, side_cam; got {camera_names}")
@@ -313,6 +319,47 @@ def validate(cfg: BatteryInsertionConfig) -> None:
     problems.extend(report["problems"])
     if problems:
         raise ValueError("battery insertion config is inconsistent:\n- " + "\n- ".join(problems))
+
+
+# A robot base must sit at least this far inside the table edge. The YAM base-link
+# footprint is not measured yet (environments/tools/probe_runtime.py reports it).
+BASE_EDGE_MARGIN_M = 0.05
+# Horizontal distance from the nearer robot base to each object's grasp point.
+REACH_RANGE_M = (0.20, 0.45)
+
+
+def _inside_table(cfg: BatteryInsertionConfig, xy: tuple[float, float], margin: float) -> bool:
+    cx, cy = cfg.table.center_xy
+    hx, hy = cfg.table.half_extents_xy
+    return abs(xy[0] - cx) <= hx - margin and abs(xy[1] - cy) <= hy - margin
+
+
+def mounting_problems(cfg: BatteryInsertionConfig) -> list[str]:
+    """Bases on the tabletop (z and XY), and objects within a plausible reach of a base."""
+    problems: list[str] = []
+    bases = []
+    for side, pose in (("left", cfg.robot.left_pose), ("right", cfg.robot.right_pose)):
+        x, y, z = pose.position_xyz
+        if abs(z - cfg.table.top_z_m) > 1e-6:
+            problems.append(f"robot {side} base z {z} must equal the table top {cfg.table.top_z_m}")
+        if not _inside_table(cfg, (x, y), BASE_EDGE_MARGIN_M):
+            problems.append(
+                f"robot {side} base XY ({x}, {y}) is not on the tabletop with a {BASE_EDGE_MARGIN_M} m margin"
+            )
+        bases.append((x, y))
+    seat = (cfg.remote_pose.position_xyz[0] + cfg.compartment.seat_center_x, cfg.remote_pose.position_xyz[1])
+    targets = {"battery bay": seat}
+    for name in cell_names(cfg):
+        pose = battery_pose(cfg, name)
+        targets[name] = (pose.position_xyz[0], pose.position_xyz[1])
+    low, high = REACH_RANGE_M
+    for name, (x, y) in targets.items():
+        nearest = min(((x - bx) ** 2 + (y - by) ** 2) ** 0.5 for bx, by in bases)
+        if not low <= nearest <= high:
+            problems.append(f"{name} is {nearest:.3f} m from the nearer robot base; expected {low}..{high} m")
+        if not _inside_table(cfg, (x, y), 0.02):
+            problems.append(f"{name} is not on the tabletop")
+    return problems
 
 
 def default_config_path() -> Path:

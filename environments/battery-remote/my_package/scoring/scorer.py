@@ -7,7 +7,8 @@ for the whole retention window, is:
 - within ``axial_tolerance_m`` of the seat along the slot, on either side
 - within ``seat_radial_max_m`` of the slot's seated axis
 - pointing its positive terminal the way that slot requires
-- touching that slot's spring plunger (geometric test against the live joint pose)
+- touching that slot's spring plunger (geometric test against the live joint pose;
+  an unreadable plunger joint is unknown, and unknown is never contact)
 - released, with the hold actually observed as false
 
 Each cell fills at most one slot and each slot holds at most one cell.
@@ -39,6 +40,7 @@ class ScoreReport:
     ever_lifted: dict[str, bool]
     retention_timer_s: dict[str, float]
     hold_unknown: tuple[str, ...]
+    spring_unknown: tuple[str, ...]
     ever_off_table: bool
     ever_remote_moved: bool
     ever_damage: bool
@@ -95,7 +97,7 @@ def is_fully_seated(cfg: BatteryInsertionConfig, snapshot: SceneSnapshot, batter
     return (
         abs(fit.axial_offset_m) <= cfg.scoring.axial_tolerance_m
         and fit.radial_offset_m <= cfg.scoring.seat_radial_max_m
-        and fit.spring_contact
+        and fit.spring_contact is True
         and polarity_matches(cfg, snapshot, battery, slot, fit)
         and is_released(battery)
     )
@@ -236,6 +238,9 @@ def step(cfg: BatteryInsertionConfig, snapshot: SceneSnapshot, dt: float) -> tup
         ever_lifted={battery.name: battery.ever_lifted for battery in new_snapshot.batteries},
         retention_timer_s={entry.slot: entry.timer_s for entry in retention},
         hold_unknown=tuple(battery.name for battery in snapshot.batteries if battery.gripper_holding is None),
+        spring_unknown=tuple(
+            sorted({fit.slot for battery in snapshot.batteries for fit in battery.fits if fit.spring_contact is None})
+        ),
         ever_off_table=ever_off,
         ever_remote_moved=ever_remote,
         ever_damage=ever_damage,

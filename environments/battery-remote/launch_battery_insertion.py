@@ -17,6 +17,12 @@ def make_parser():
     parser.add_argument("--num-steps", type=int, default=None, help="Default: 50 smoke steps, or 1000000 when streaming.")
     parser.add_argument("--enable-cameras", action="store_true", help="Also create the three task cameras.")
     parser.add_argument("--single-slot", action="store_true")
+    parser.add_argument(
+        "--capture-dir",
+        type=Path,
+        default=None,
+        help="With --enable-cameras, save each task camera's RGB at ROBOCURVE_CAPTURE_STEPS (default 1,25,49).",
+    )
     return parser
 
 
@@ -51,6 +57,8 @@ def main():
         parser.error("--num-steps must be positive")
     if args.stream and not args.public_ip:
         parser.error("Streaming needs --public-ip INSTANCE_IP (or PUBLIC_IP).")
+    if args.capture_dir is not None and not args.enable_cameras:
+        parser.error("--capture-dir needs --enable-cameras")
     root = Path(__file__).resolve().parent
     runner = args.arena_root / "isaaclab_arena/evaluation/policy_runner.py"
     if not runner.is_file():
@@ -63,6 +71,8 @@ def main():
     (root / "outputs").mkdir(exist_ok=True)
     generated = Path(tempfile.mkdtemp(prefix="assets-", dir=root / "outputs"))
     os.environ["ROBOCURVE_GENERATED_DIR"] = str(generated)
+    if args.capture_dir is not None:
+        os.environ["ROBOCURVE_CAPTURE_DIR"] = str(args.capture_dir.resolve())
     sys.path.insert(0, str(args.arena_root))
     sys.path.insert(0, str(root))
     import torch  # before Kit: prevents its older CUDA library from shadowing PyTorch's
