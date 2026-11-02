@@ -123,7 +123,10 @@ class ConfigTests(unittest.TestCase):
             (lambda d: d["robot"].__setitem__("left_base_xyz", [-0.05, 0.22, 0.003]), "tabletop"),
             (lambda d: d["robot"].__setitem__("usd_path", "assets/yam/yam.usda"), "absolute"),
             (lambda d: d["fastener"].__setitem__("pin_tip_radius_m", 0.0039), "overlap"),
-            (lambda d: d["fastener"].__setitem__("ridge_thickness_m", 0.0007), "clearance"),
+            # 0.8 mm ridge + 0.5 mm pin exceed the 1.25 mm pitch: no axial groove left.
+            (lambda d: d["fastener"].__setitem__("ridge_thickness_m", 0.0008), "clearance"),
+            # A detection margin below the ridge thickness let pins tunnel on the server.
+            (lambda d: d["fastener"].__setitem__("thread_contact_offset_m", 0.00004), "tunnel"),
         ):
             data = yaml.safe_load(yaml.safe_dump(base))
             mutate(data)

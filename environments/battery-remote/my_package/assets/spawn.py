@@ -54,6 +54,13 @@ class ConfiguredUsdObject(Object):
             collision_props=sim_utils.CollisionPropertiesCfg(contact_offset=physics["contact_offset_m"]),
             # None keeps the USD-authored per-body masses.
             mass_props=None if mass is None else sim_utils.MassPropertiesCfg(mass=mass),
+            # The remote (the only object with actuators) must not sleep, or its spring drives
+            # stop responding to targets; this overrides the USD value at spawn time too.
+            articulation_props=(
+                sim_utils.ArticulationRootPropertiesCfg(sleep_threshold=0.0, stabilization_threshold=0.0)
+                if self._actuators
+                else None
+            ),
         )
 
     def _generate_rigid_cfg(self):

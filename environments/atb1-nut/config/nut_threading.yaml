@@ -21,8 +21,11 @@ fastener:
   pin_width_m: 0.0012
   pin_count: 3
   segments_per_turn: 24
-  # Thread parts only. Must stay well below the 0.1 mm per-side clearances above.
-  thread_contact_offset_m: 0.00004
+  # Thread parts only. This is the contact DETECTION margin (restOffset is 0, so it adds no
+  # gap). It must exceed the nut's per-step travel: at 0.04 mm the 942249a server run showed
+  # pins crossing the 0.5 mm ridge midline in one step and being pushed out downward, so the
+  # nut fell through every turn. 0.8 mm covers ~0.1 m/s at dt = 1/120 s.
+  thread_contact_offset_m: 0.0008
   across_flats_m: 0.013
   nut_height_m: 0.0068
   nut_mass_kg: 0.005

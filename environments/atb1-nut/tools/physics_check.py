@@ -356,9 +356,9 @@ def main() -> None:
     _stage(report, "settle", settle)
 
     def engage():
-        # 20 degrees clockwise past the ridge start, 0.5 mm above where the pins would land.
+        # 20 degrees clockwise past the ridge start, 0.1 mm above where the pins would land.
         start_gap = travel - f.pitch_m * 20.0 / 360.0
-        place(start_gap + 0.0005, 20.0)
+        place(start_gap + 0.0001, 20.0)
         placed = read()
         scorer["snapshot"] = None
         # Every step for the first 0.1 s: the 0afbd1a run only kept the last samples, by which

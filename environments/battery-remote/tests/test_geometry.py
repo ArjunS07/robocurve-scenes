@@ -204,9 +204,16 @@ class GeometryTests(unittest.TestCase):
         spawn = (Path(__file__).resolve().parents[1] / "my_package" / "assets" / "spawn.py").read_text()
         self.assertIn("mass_props=None if mass is None", spawn)
         # The server's Isaac Lab cannot apply fix_root_link to this hierarchy; the USDA anchors it.
-        self.assertNotIn("fix_root_link=True", spawn)
-        self.assertNotIn("ArticulationRootPropertiesCfg", spawn)
+        self.assertNotIn("fix_root_link=", spawn)
         self.assertNotIn("physics_material=", spawn)
+        # A sleeping remote ignored spring-drive targets on the server; it must never sleep.
+        self.assertIn("ArticulationRootPropertiesCfg(sleep_threshold=0.0, stabilization_threshold=0.0)", spawn)
+
+    def test_remote_articulation_never_sleeps_in_usd(self):
+        with tempfile.TemporaryDirectory() as directory:
+            text = write_geometry(self.cfg, directory)["remote"].read_text()
+        self.assertIn("float physxArticulation:sleepThreshold = 0", text)
+        self.assertIn("float physxArticulation:stabilizationThreshold = 0", text)
 
     def test_fixed_base_is_authored_like_the_yam_asset(self):
         """One articulation root, on the chassis rigid body, anchored by root_joint."""

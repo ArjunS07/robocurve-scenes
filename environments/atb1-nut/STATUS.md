@@ -21,7 +21,7 @@ One approximate M8 × 1.25 nut-and-stud station inspired by the 8 mm nut on NIST
 - recorder and reset callbacks accept lists, tensors, slices, and `None`;
 - gripper body `gripper`; if it or a finger joint is missing, holding is UNKNOWN, a warning prints the live names once, and the nut is never treated as released (no 100 or 50 credit);
 - the generated ridge boxes lie on the helix (parsed back from the USDA), the pins sit on the ridge at every turn, and the turn above blocks a straight pull-off;
-- thread clearances exceed twice the contact offset; wedge angle sits between the threaded tilt (2.45°) and the jam tilt (5.36°);
+- thread clearances are positive and the thread contact offset (0.8 mm, a detection margin with restOffset 0) is at least the ridge thickness; wedge angle sits between the threaded tilt (2.45°) and the jam tilt (5.36°);
 - robot bases on the measured tabletop, 4 cm inside its edge, 0.31–0.37 m from the station; robot USDA path absolute;
 - generated assets go to `ROBOCURVE_GENERATED_DIR` (the launcher makes a fresh `outputs/assets-*`), never the source tree; tests use temp dirs;
 - launcher flags, ordering, and import order.
@@ -37,7 +37,7 @@ The stud is a core cylinder (r 3.3 mm) plus a right-hand helical ridge (crest r 
 
 These are ordinary PhysX contacts between box colliders. Nothing is welded, toggled, or snapped at runtime, and the scorer does not enforce threading; it still checks every step that rotation and descent agree (cross-thread detection) and that the nut is coaxial.
 
-**Not yet demonstrated:** that PhysX resolves these 0.1–0.3 mm clearances stably at dt = 1/120 s with 16 position iterations (thread contact offset 0.04 mm), that the pins neither jam nor tunnel through the ridge, and that the seams between ridge boxes do not snag. `tools/physics_check.py` measures each of these (descent per turn, helix deviation, tilt, release drift, pull-off rise, seat, back-off). If it shows snagging, raise `segments_per_turn`; if pins tunnel, raise solver iterations or lower the drive torque.
+**Not yet demonstrated:** that PhysX resolves these 0.1–0.3 mm clearances stably at dt = 1/120 s with 16 position iterations (thread contact offset 0.8 mm; at 0.04 mm the 942249a server run showed the pins tunnelling through every ridge turn, the nut accelerating at about 2 g to the seat), that the pins neither jam nor tunnel through the ridge, and that the seams between ridge boxes do not snag. `tools/physics_check.py` measures each of these (descent per turn, helix deviation, tilt, release drift, pull-off rise, seat, back-off). If it shows snagging, raise `segments_per_turn`; if pins tunnel, raise solver iterations or lower the drive torque.
 
 Thread form is simplified: rectangular ridge and pins, not a 60° profile, so there is no radial wedging and no preload model. Seating is the nut's face meeting the collar; tightening torque is not modelled.
 

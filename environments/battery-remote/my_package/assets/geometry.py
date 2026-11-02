@@ -792,6 +792,10 @@ def Xform "remote"
         int physxRigidBody:solverPositionIterationCount = {compartment.solver_position_iterations}
         int physxRigidBody:solverVelocityIterationCount = {compartment.solver_velocity_iterations}
         bool physxArticulation:enabledSelfCollisions = false
+        # Never sleep. A resting remote fell asleep and its spring drives then ignored new
+        # targets: on the server a free plunger stayed at 0 under 0.86 N (942249a).
+        float physxArticulation:sleepThreshold = 0
+        float physxArticulation:stabilizationThreshold = 0
         quatf xformOp:orient = (1, 0, 0, 0)
         double3 xformOp:translate = (0, 0, 0)
         uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:orient"]

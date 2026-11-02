@@ -177,7 +177,8 @@ def advance_all(env, cfg) -> None:
         runtime.observe(cfg, observe_snapshot(env, cfg, index), token, dt)
 
 
-def reset_episode_memory(env, env_ids, **_kwargs) -> None:
+def reset_episode_memory(env, env_ids) -> None:
+    # No **kwargs: Isaac Lab's term resolver counts them as a required parameter.
     runs = runtimes_for(env)
     for index in env_indices(env_ids, len(runs)):
         runs[index].on_reset()

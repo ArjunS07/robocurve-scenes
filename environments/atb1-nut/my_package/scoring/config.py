@@ -486,7 +486,12 @@ def validate_config(config: NutThreadingConfig) -> None:
 
 
 def _validate_thread(fastener: FastenerSpec) -> None:
-    """Clearances of the physical thread. Every per-side gap must exceed twice the contact offset."""
+    """Clearances of the physical thread, and a contact offset large enough to stop tunnelling.
+
+    The contact offset is a detection margin (restOffset is 0), not a gap, so it is not
+    compared with the clearances. It must be at least the ridge thickness: otherwise a pin
+    can pass the ridge midline before contact starts and get pushed through (server 942249a).
+    """
     offset = fastener.thread_contact_offset_m
     gaps = {
         "bore wall to ridge": fastener.hole_radius_m - fastener.major_radius_m,
@@ -494,8 +499,13 @@ def _validate_thread(fastener: FastenerSpec) -> None:
         "axial groove": (fastener.pitch_m - fastener.ridge_thickness_m - fastener.pin_thickness_m) / 2.0,
     }
     for name, gap in gaps.items():
-        if gap <= 2.0 * offset:
-            raise ValueError(f"thread clearance {name} is {gap * 1000:.3f} mm, not above 2x the contact offset")
+        if gap <= 0.0:
+            raise ValueError(f"thread clearance {name} is {gap * 1000:.3f} mm; it must be positive")
+    if offset < fastener.ridge_thickness_m:
+        raise ValueError(
+            f"thread contact offset {offset * 1000:.3f} mm is below the ridge thickness "
+            f"{fastener.ridge_thickness_m * 1000:.3f} mm; pins would tunnel through the ridge"
+        )
     overlap = fastener.major_radius_m - fastener.pin_tip_radius_m
     if overlap <= 2.0 * (fastener.pin_tip_radius_m - fastener.core_radius_m):
         raise ValueError("pins must overlap the ridge by more than twice their radial play, or they can slip past it")
