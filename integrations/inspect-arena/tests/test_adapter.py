@@ -231,7 +231,7 @@ class AgentContractTests(unittest.TestCase):
         self.assertEqual(policy.config.wire, 'chat')
         self.assertIsNone(policy.config.max_output_tokens)
         self.assertEqual(policy.config.max_llm_calls, 1)
-        self.assertEqual(policy.config.max_retries, 1)
+        self.assertEqual(policy.config.max_retries, 3)
 
 
     def test_real_inspect_eval_preserves_partial_task_score_and_failure_status(self):

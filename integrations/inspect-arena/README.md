@@ -9,7 +9,7 @@ Local tests use the exact reported server SDK versions, built from Inspect Robot
 - `inspect-robots 0.0.1.dev1+gc8a821ba7`
 - `inspect-robots-agent 0.29.0`
 
-42 tests pass with fake simulator data, including the real agent with a mocked OpenRouter response and the real Inspect eval/logging loop. No paid calls occur in these tests.
+45 tests pass with fake simulator data, including the real agent with a mocked OpenRouter response and the real Inspect eval/logging loop. No paid calls occur in these tests.
 
 The server has verified the scene/camera bootstrap, Argon communication, raw-joint motion, and MP4 export. The server reach check passed all nine small-motion phases with final position errors below 0.1 mm, and consecutive agent moves now execute. Full piece grasping and reliable visual board interpretation are still unproven. A broken scene still needs to be fixed in that scene. Passing the reach check establishes local tracking, not a successful piece grasp or chess benchmark.
 
@@ -97,9 +97,26 @@ Client: server `global.prd.ga.run.brev.nvidia.com`, signal `24317`, stream `2833
 
 This is actual model-driven simulated motion. It uses `google/gemini-4-argon`, explicitly routed to `https://openrouter.ai/api/v1`, the `OPENROUTER_API_KEY` variable, and the Chat Completions wire. If the key is absent it prompts in an interactive terminal with hidden input and does not save it. Do not put the key into command-line arguments or source.
 
-All three RGB images are sent on each policy decision. The agent has a three-call budget by default and one HTTP attempt per completion. This SDK does not support an output-token cap on its Chat wire, so no per-request token cap is claimed. The exact policy configuration is validated before Kit starts. The limit on environment steps can truncate a motion chunk. The result is a bring-up trial, not the full task benchmark.
+All three RGB images are sent on each policy decision. The agent has a three-call budget by default and up to three HTTP attempts per model decision. This SDK does not support an output-token cap on its Chat wire, so no per-request token cap is claimed. The exact policy configuration is validated before Kit starts. The limit on environment steps can truncate a motion chunk. The result is a bring-up trial, not the full task benchmark.
 
 Inspect logs, frame sidecars and agent transcripts go into the run's `inspect/` directory. The default upstream policy retains its provider-specific tool metadata between calls.
+
+## Bounded recovery from provider timeouts
+
+`--request-attempts 3` (the default) uses the installed Inspect SDK's native retry
+loop for network/read failures, HTTP 429 and HTTP 5xx. It makes up to three total
+attempts per model decision, not three additional retries. Exponential backoff
+starts at 2 seconds (then 4); a provider Retry-After header takes precedence.
+`--retry-backoff-seconds` changes the base delay. Authentication and other
+non-transient 4xx errors fail immediately.
+
+The installed Chat client retains its 120-second HTTP timeout settings. There is
+no overall wall-clock deadline. Retries resend the same model request while
+simulation is paused; they do not restart the environment, repeat a previous
+robot move or advance physics. Only a successfully received action chunk is
+executed. `--max-llm-calls` limits model decisions, not raw HTTP attempts; 12
+decisions can therefore make up to 36 HTTP attempts. Retry settings are recorded
+in `run.json`, and exhausting them still preserves the partial MP4 and error log.
 
 ## Default MP4 recording for agent runs
 

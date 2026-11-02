@@ -12,12 +12,12 @@ import sys
 from uuid import uuid4
 
 
-def create_agent_policy(model, max_llm_calls, *, transport=None, env=None):
+def create_agent_policy(model, max_llm_calls, *, transport=None, env=None, request_attempts=3, backoff_s=2.):
     """One tested configuration for the installed Inspect agent's Chat wire."""
     from inspect_robots_agent.policy import LLMAgentPolicy
     return LLMAgentPolicy(model=model, base_url='https://openrouter.ai/api/v1',
                           api_key_env='OPENROUTER_API_KEY', wire='chat', images='always',
-                          depth='off', wire_capture=False, effort='low', max_retries=1,
+                          depth='off', wire_capture=False, effort='low', max_retries=request_attempts, backoff_s=backoff_s,
                           max_llm_calls=max_llm_calls, transcript_echo=True,
                           transport=transport, env=env)
 
@@ -48,9 +48,16 @@ def main():
     parser.add_argument('--ffmpeg', help='Optional FFmpeg executable for default agent MP4 recording')
     parser.add_argument('--model', default='google/gemini-4-argon')
     parser.add_argument('--max-llm-calls', type=int, default=3)
+    parser.add_argument('--request-attempts', type=int, default=3,
+                        help='Maximum HTTP attempts per model decision, including the initial request')
+    parser.add_argument('--retry-backoff-seconds', type=float, default=2.)
     args = parser.parse_args()
     if args.steps <= 0 or args.max_llm_calls <= 0:
         parser.error('--steps and --max-llm-calls must be positive')
+    if args.request_attempts <= 0:
+        parser.error('--request-attempts must be positive')
+    if not math.isfinite(args.retry_backoff_seconds) or args.retry_backoff_seconds < 0:
+        parser.error('--retry-backoff-seconds must be finite and nonnegative')
     if args.episode_seconds is not None and (not math.isfinite(args.episode_seconds) or args.episode_seconds <= 0):
         parser.error('--episode-seconds must be positive and finite')
     if args.mode=='reach-check' and args.control_interface!='eef_pos':
@@ -80,7 +87,8 @@ def main():
             parser.error('An OpenRouter key is required for agent mode')
     # Validate the exact provider settings before spending time starting Kit.
     # This constructor does not make a completion request.
-    policy = create_agent_policy(args.model, args.max_llm_calls) if args.mode == 'agent' else None
+    policy = create_agent_policy(args.model, args.max_llm_calls, request_attempts=args.request_attempts,
+                                 backoff_s=args.retry_backoff_seconds) if args.mode == 'agent' else None
     # Import torch before Arena. Other adapter modules are numpy/Inspect-only.
     import torch
     from inspect_robots import Action, Scene, Task, eval, success_at_end
@@ -99,6 +107,8 @@ def main():
                   'requested_episode_seconds': args.episode_seconds,
                   'requested_max_environment_steps': args.steps,
                   'max_llm_calls': args.max_llm_calls if args.mode == 'agent' else None,
+                  'request_attempts_per_decision': args.request_attempts if args.mode == 'agent' else None,
+                  'retry_backoff_seconds': args.retry_backoff_seconds if args.mode == 'agent' else None,
                   'motion_guardrails': 'Inspect ClampApprover + DeltaLimitApprover; adapter bounds/rate checks retained',
                   'video': {'enabled': args.mode in ('agent','reach-check'), 'encoder': encoder,
                             'composite': 'rollout.mp4' if args.mode in ('agent','reach-check') else None},
@@ -129,6 +139,9 @@ def main():
         print(f"Episode budget: {provenance['effective_episode_seconds']:g} simulation seconds; "
               f"up to {provenance['effective_max_environment_steps']} steps; "
               f"model-call limit: {provenance['max_llm_calls']}", flush=True)
+        if args.mode == 'agent':
+            print(f'Model requests: up to {args.request_attempts} attempts per decision; '
+                  f'exponential retry backoff starts at {args.retry_backoff_seconds:g}s', flush=True)
         scene = Scene(id=args.scene, instruction=instruction)
         if args.mode == 'reach-check':
             from robocurve_inspect.probe import run_reach_check
