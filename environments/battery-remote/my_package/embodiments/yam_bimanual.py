@@ -191,12 +191,12 @@ def _actuator(names: tuple[str, ...] | list[str], stiffness: float, damping: flo
 
 
 def add_link_colliders(root_prim) -> dict:
-    """Give every YAM link mesh a convex-hull collider. Returns counts for reporting.
+    """Make sure every YAM link mesh collides. Returns counts for reporting.
 
-    The converted YAM USDA has no collision geometry at all (the source URDF has
-    none), so without this the arms pass through the board and cannot pinch a
-    piece. This edits only the spawned prims on the stage, never the shared file.
-    Instance proxies cannot be edited and are counted instead.
+    Measured on the server (c4f4e56): the converted YAM USDA already has 9 link
+    colliders per arm, inside instanced prims, so this normally adds none. It
+    stays as a guard for assets without colliders and reports what it finds.
+    It edits only the spawned prims on the stage, never the shared file.
     """
     from collections import Counter
 
@@ -207,7 +207,7 @@ def add_link_colliders(root_prim) -> dict:
     stage.Load(root_prim.GetPath())
     everything = Usd.TraverseInstanceProxies(Usd.PrimAllPrimsPredicate)
     # The link visuals are instanced, and a plain PrimRange does not enter instances
-    # (the first server run added 0 colliders). Instance proxies cannot be edited, so
+    # (an earlier scan saw 0 colliders for that reason). Instance proxies cannot be edited, so
     # de-instance them on this stage only, repeating for nested instances.
     deinstanced = 0
     for _ in range(8):
