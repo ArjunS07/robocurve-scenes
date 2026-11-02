@@ -9,7 +9,7 @@ from my_package.tasks.state_values import env_indices, quaternion_xyzw
 from my_package.scoring.action_map import arm_bindings
 from my_package.scoring.config import active_slots, cell_names, plunger_joint_name
 from my_package.scoring.grasp import gripper_is_holding
-from my_package.scoring.math3d import norm, sub, yaw_error_deg
+from my_package.scoring.math3d import norm, rotate, sub, yaw_error_deg
 from my_package.scoring.runtime_state import (
     already_updated,
     clear_env,
@@ -125,16 +125,20 @@ def _gripper_observation(env, env_index: int, cfg):
             )
             continue
         origin = env.scene.env_origins[env_index]
-        # Hold point: midpoint of the two fingertip bodies (measured on the YAM USDA as
-        # tip_left / tip_right). The gripper body's origin sits several cm behind the tips, so
-        # measuring from it could miss a cell pinched between the fingers.
+        # Hold point: midpoint of the two finger pads. Each pad centre sits ~173 mm from its
+        # finger body's origin (measured, config finger_pad_offsets_m), so neither the gripper
+        # body nor the finger body origins are anywhere near a pinched cell.
         tips = [_find_tip(asset, binding.side, name) for name in ("tip_left", "tip_right")]
         if all(index is not None for index in tips):
-            hold_pos = 0.5 * (asset.data.body_pos_w[env_index, tips[0]] + asset.data.body_pos_w[env_index, tips[1]]) - origin
+            pads = []
+            for tip, offset in zip(tips, cfg.robot.finger_pad_offsets_m):
+                pos = _as_tuple3(asset.data.body_pos_w[env_index, tip] - origin)
+                quat = quaternion_xyzw(asset.data.body_quat_w[env_index, tip])
+                pads.append(tuple(p + d for p, d in zip(pos, rotate(quat, offset))))
+            positions.append(tuple(0.5 * (a + b) for a, b in zip(*pads)))
         else:
             _warn(f"tips-{binding.side}", f"fingertip bodies not found on {binding.asset_name}; holding is measured from the gripper body")
-            hold_pos = asset.data.body_pos_w[env_index, body_index] - origin
-        positions.append(_as_tuple3(hold_pos))
+            positions.append(_as_tuple3(asset.data.body_pos_w[env_index, body_index] - origin))
         joint_pos = asset.data.joint_pos[env_index]
         fingers.append((float(joint_pos[finger_ids[0]]), float(joint_pos[finger_ids[1]])))
     return tuple(positions), tuple(fingers)

@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from my_package.embodiments.action_map import FINGER_JOINTS
 from my_package.embodiments.grasp import any_arm_holding, hold_known, mean_open_fraction
-from my_package.scoring.math3d import norm, sub
+from my_package.scoring.math3d import norm, rotate, sub
 from my_package.scoring.snapshot import NutSnapshot, SceneSnapshot
 from my_package.tasks.runtime_state import EpisodeRuntime
 from my_package.tasks.state_values import env_indices, quaternion_xyzw
@@ -84,7 +84,7 @@ def _finger_names(layout: str, side: str) -> tuple[str, ...]:
     return tuple(f"{prefix}{name}" for name in FINGER_JOINTS)
 
 
-def _arm_reading(robot, env_index, origin, nut_position, body_name: str, finger_names, finger_open, finger_closed):
+def _arm_reading(robot, env_index, origin, nut_position, body_name: str, finger_names, finger_open, finger_closed, pad_offsets):
     body_names = [str(name) for name in robot.body_names]
     joint_names = [str(name) for name in robot.joint_names]
     if body_name not in body_names or any(name not in joint_names for name in finger_names):
@@ -97,14 +97,18 @@ def _arm_reading(robot, env_index, origin, nut_position, body_name: str, finger_
         return None
     body_index = body_names.index(body_name)
     positions = _tensor(robot.data.body_pos_w)[env_index]
-    # Hold point: midpoint of the fingertip bodies (tip_left / tip_right on the YAM USDA), not the
-    # gripper body's origin, which sits several cm behind the tips.
+    # Hold point: midpoint of the two finger pads. Each pad centre sits ~173 mm from its finger
+    # body's origin (measured, config finger_pad_offsets_m), so body origins are far from the nut.
     prefix = body_name[: -len("gripper")] if body_name.endswith("gripper") else ""
     tip_names = [prefix + "tip_left", prefix + "tip_right"]
     if all(name in body_names for name in tip_names):
-        left_tip = _row(positions, body_names.index(tip_names[0]))
-        right_tip = _row(positions, body_names.index(tip_names[1]))
-        body_world = tuple(0.5 * (a + b) for a, b in zip(left_tip, right_tip))
+        quats = _tensor(robot.data.body_quat_w)[env_index]
+        pads = []
+        for name, offset in zip(tip_names, pad_offsets):
+            index = body_names.index(name)
+            quat = quaternion_xyzw(quats[index])
+            pads.append(tuple(p + d for p, d in zip(_row(positions, index), rotate(quat, offset))))
+        body_world = tuple(0.5 * (a + b) for a, b in zip(*pads))
     else:
         _warn_once(f"tips-{body_name}", f"nut threading: fingertip bodies {tip_names} not found; holding is measured from {body_name!r}")
         body_world = _row(positions, body_index)
@@ -152,6 +156,7 @@ def observe_snapshot(env, cfg, env_index: int) -> SceneSnapshot:
                 _finger_names(robot.layout, side),
                 robot.finger_open_m,
                 robot.finger_closed_m,
+                robot.finger_pad_offsets_m,
             )
         )
     known = hold_known(arms)

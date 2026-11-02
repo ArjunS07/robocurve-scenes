@@ -113,6 +113,8 @@ class RobotSpec:
     left_base_xyz: tuple[float, float, float]
     right_base_xyz: tuple[float, float, float]
     gripper_body_name: str
+    # Centre of each finger's geometry (pad) in that finger body's frame: tip_left, tip_right.
+    finger_pad_offsets_m: tuple[tuple[float, float, float], tuple[float, float, float]]
     proximal: ActuatorSpec
     distal: ActuatorSpec
     finger: ActuatorSpec
@@ -317,6 +319,7 @@ def parse_config(data: dict) -> NutThreadingConfig:
             "left_base_xyz",
             "right_base_xyz",
             "gripper_body_name",
+            "finger_pad_offsets_m",
             "actuators",
         ),
         "robot",
@@ -411,6 +414,10 @@ def parse_config(data: dict) -> NutThreadingConfig:
             left_base_xyz=_vector(robot_data["left_base_xyz"], "robot.left_base_xyz", 3),
             right_base_xyz=_vector(robot_data["right_base_xyz"], "robot.right_base_xyz", 3),
             gripper_body_name=_text(robot_data["gripper_body_name"], "robot.gripper_body_name"),
+            finger_pad_offsets_m=tuple(
+                _vector(offset, f"robot.finger_pad_offsets_m[{k}]", 3)
+                for k, offset in enumerate(robot_data["finger_pad_offsets_m"])
+            ),
             proximal=_actuator(actuator_data["proximal"], "robot.actuators.proximal"),
             distal=_actuator(actuator_data["distal"], "robot.actuators.distal"),
             finger=_actuator(actuator_data["finger"], "robot.actuators.finger"),

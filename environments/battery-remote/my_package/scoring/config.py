@@ -127,6 +127,8 @@ class RobotSpec:
     home_arm_rad: tuple[float, float, float, float, float, float]
     finger_closed_m: float
     finger_open_m: float
+    # Centre of each finger's geometry (pad) in that finger body's frame: tip_left, tip_right.
+    finger_pad_offsets_m: tuple[tuple[float, float, float], tuple[float, float, float]]
     home_open_fraction: float
     arm_action_scale: float
     gripper_action_scale: float
