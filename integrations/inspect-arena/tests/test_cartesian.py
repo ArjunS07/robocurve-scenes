@@ -131,6 +131,49 @@ class CartesianContractTests(unittest.TestCase):
         np.testing.assert_allclose(state[7:10],[.3,0,.2])
         self.assertEqual(sum(p.get('type')=='image_url' for p in requests[0]['messages'][-1]['content']),3)
 
+    def test_two_real_agent_moves_rebase_from_measurement_without_rate_fault(self):
+        import httpx
+        from run_inspect import create_agent_policy, create_motion_approver
+        env,adapter,obs=cartesian_setup()
+        requests=[]
+        def respond(request):
+            requests.append(json.loads(request.content))
+            z=.21 if len(requests)==1 else .23
+            return httpx.Response(200,json={'choices':[{'finish_reason':'tool_calls','message':{
+                'role':'assistant','content':None,'tool_calls':[{'id':f'eef-{len(requests)}',
+                'type':'function','function':{'name':'move_to','arguments':json.dumps({
+                'targets':{'left_z':z},'note':'Move left gripper upward.'})}}]}}]})
+        policy=create_agent_policy('google/gemini-4-argon',2,transport=httpx.MockTransport(respond),
+                                   env={'OPENROUTER_API_KEY':'offline-test'})
+        policy.bind(adapter.info);policy.reset(Scene('test','Lift left gripper'))
+        approver=create_motion_approver(adapter.info.action_space);store={}
+        executed=[]
+        for action in policy.act(obs).actions:
+            reviewed=approver.review(action,store)
+            result=adapter.step(reviewed);executed.append(reviewed.data.copy())
+        # Add only 0.2 mm of endpoint overshoot. Inspect correctly seeds the
+        # NEXT tool interpolation from this measured pose, not the old goal.
+        overshoot=adapter._last_target[2]+.0002-adapter.observe().state['eef_state'][2]
+        env.scene['left'].data.joint_pos[0,2]+=overshoot/.1
+        obs=adapter.observe()
+        chunk=policy.act(obs)
+        self.assertGreater(chunk.actions[0].data[2]-adapter._last_target[2],adapter.max_step[2]+1e-6)
+        before=len(env.native_calls)
+        with self.assertRaisesRegex(ValueError,'per-step motion limit'):
+            adapter.step(chunk.actions[0])
+        self.assertEqual(len(env.native_calls),before)
+        clamped=False
+        for action in chunk.actions:
+            reviewed=approver.review(action,store)
+            clamped |= bool(reviewed.meta.get('delta_clamped'))
+            result=adapter.step(reviewed);executed.append(reviewed.data.copy())
+        self.assertTrue(clamped)
+        self.assertEqual(len(requests),2)
+        self.assertLess(abs(result.observation.state['eef_state'][2]-.23),.001)
+        # Keep the existing hard command-rate check; record every SDK clamp.
+        self.assertTrue(np.all(np.abs(np.diff(executed,axis=0))<=adapter.max_step+1e-6))
+        self.assertGreater(len(env.native_calls),before)
+
     def test_model_free_probe_tracks_both_arms_and_saves_all_camera_frames(self):
         from robocurve_inspect.probe import run_reach_check
         env,adapter,_=cartesian_setup()

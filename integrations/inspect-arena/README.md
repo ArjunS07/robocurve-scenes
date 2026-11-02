@@ -141,6 +141,21 @@ Proprioception contains one labeled mixed-unit `joint_command_state` vector matc
 
 Camera labels always map to `overhead`, `front`, `side`. RGB/RGBA input is copied to uint8 RGB without retaining reused simulator buffers. Missing images, unexpected sizes/dtypes, and invalid measured state fail instead of fabricating observations.
 
+## Consecutive agent moves and stop diagnostics
+
+Agent runs explicitly use Inspect's `ClampApprover` and `DeltaLimitApprover`.
+The Python `eval()` API otherwise defaults to an unrestricted `AutoApprover`.
+The agent interpolates each new tool motion from measured state, which can differ
+slightly from the previous commanded endpoint. The rate limiter bridges that
+handoff within the declared command limits; the adapter's own bounds and rate
+checks remain enabled. Inspect records modified actions as approval events.
+
+Every returned evaluation writes `eval_summary.json` with status, errors,
+completed steps, simulation duration, per-scene stop reasons and scores. An error
+log is treated as a failed run even when `eval()` returns normally. Partial MP4
+export still runs before Kit closes. A saved MP4 alone does not mean the trial
+completed successfully.
+
 ## Scoring and reset behavior
 
 The launcher adds an isolated recorder to capture images, state and task reports **before** Arena automatically resets a terminal environment. Terminal results without that capture fail rather than grading the new scene. An explicit reset is required before stepping again after termination.

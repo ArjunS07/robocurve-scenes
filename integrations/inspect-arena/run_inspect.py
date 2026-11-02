@@ -22,6 +22,12 @@ def create_agent_policy(model, max_llm_calls, *, transport=None, env=None):
                           transport=transport, env=env)
 
 
+def create_motion_approver(action_space):
+    """Use Inspect's recorded rate limiter across measured-state replanning boundaries."""
+    from inspect_robots.approver import ChainApprover, ClampApprover, DeltaLimitApprover
+    return ChainApprover(ClampApprover(action_space), DeltaLimitApprover(action_space))
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--scene', choices=('chess-mate', 'battery-remote', 'atb1-nut'), required=True)
@@ -91,6 +97,7 @@ def main():
                   'requested_episode_seconds': args.episode_seconds,
                   'requested_max_environment_steps': args.steps,
                   'max_llm_calls': args.max_llm_calls if args.mode == 'agent' else None,
+                  'motion_guardrails': 'Inspect ClampApprover + DeltaLimitApprover; adapter bounds/rate checks retained',
                   'video': {'enabled': args.mode in ('agent','reach-check'), 'encoder': encoder,
                             'composite': 'rollout.mp4' if args.mode in ('agent','reach-check') else None},
                   'versions': {}}
@@ -141,8 +148,17 @@ def main():
             rollout_failed = False
             try:
                 logs = eval(task, policy, adapter, log_dir=str(output / 'inspect'), store_frames=True,
-                            fail_on_error=True, environment_revision=provenance['git_commit'])
-                print(f'Inspect completed; log directory: {output / "inspect"}')
+                            fail_on_error=True, environment_revision=provenance['git_commit'],
+                            approver=create_motion_approver(adapter.info.action_space))
+                from robocurve_inspect.results import save_eval_summary
+                summary = save_eval_summary(logs, output, adapter.info.control_hz)
+                for run in summary['runs']:
+                    print(f"Inspect status: {run['status']}; {run['total_steps']} steps / "
+                          f"{run['simulation_seconds']:.2f} simulation seconds; "
+                          f"stop reasons: {[s['termination_reasons'] for s in run['scenes']]}", flush=True)
+                if summary['errors']:
+                    raise RuntimeError('Inspect rollout failed: ' + '; '.join(summary['errors']))
+                print(f'Inspect log directory: {output / "inspect"}', flush=True)
             except BaseException:
                 rollout_failed = True
                 raise

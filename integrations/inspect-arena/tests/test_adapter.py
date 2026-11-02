@@ -253,7 +253,41 @@ class AgentContractTests(unittest.TestCase):
             self.assertEqual(logs[0].samples[0].reduced['arena_task_score'], 50.)
             self.assertEqual(logs[0].samples[0].reduced['success_at_end'], 0.)
             self.assertEqual(logs[0].samples[0].termination_reasons, ('time_limit',))
+            from robocurve_inspect.results import save_eval_summary
+            summary=save_eval_summary(logs,Path(directory),adapter.info.control_hz)
+            self.assertEqual(summary['errors'],[])
+            self.assertEqual(summary['runs'][0]['scenes'][0]['termination_reasons'],['time_limit'])
             self.assertTrue(list(Path(directory).rglob('*.json')))
+
+
+class EvalSummaryTests(unittest.TestCase):
+    def test_returned_embodiment_fault_is_reported_with_partial_step_count(self):
+        from inspect_robots import ActionChunk, PolicyConfig, PolicyInfo, Task, eval
+        from robocurve_inspect.adapter import ArenaTaskScore
+        from robocurve_inspect.results import save_eval_summary
+        env,adapter,_=setup()
+        class FaultPolicy:
+            config=PolicyConfig()
+            info=PolicyInfo('fault',adapter.info.action_space,adapter.info.observation_space)
+            def reset(self,scene): self.calls=0
+            def act(self,observation):
+                self.calls+=1
+                target=observation.state['joint_command_state'].copy()
+                if self.calls==2: target[0]+=.5
+                return ActionChunk([Action(target)])
+            def close(self): pass
+        task=Task('fake_sim',[Scene('test','Hold')],[ArenaTaskScore()],max_steps=20)
+        with tempfile.TemporaryDirectory() as directory:
+            logs=eval(task,FaultPolicy(),adapter,log_dir=directory,store_frames=True,fail_on_error=True)
+            # eval returns an error LOG rather than throwing this adapter fault.
+            self.assertEqual(logs[0].status,'error')
+            summary=save_eval_summary(logs,Path(directory),15.)
+            self.assertEqual(summary['runs'][0]['total_steps'],1)
+            self.assertAlmostEqual(summary['runs'][0]['simulation_seconds'],1/15)
+            self.assertIn('per-step motion limit',';'.join(summary['errors']))
+            self.assertIn('EmbodimentFault',';'.join(summary['errors']))
+            self.assertEqual(json.loads((Path(directory)/'eval_summary.json').read_text()),summary)
+
 
 
 if __name__ == '__main__':
