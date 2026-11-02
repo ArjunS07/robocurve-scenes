@@ -768,3 +768,13 @@ class TaskTermParamsTests(unittest.TestCase):
         self.assertNotIn('params={"cfg"', text)
         self.assertNotIn("partial(", text)
         self.assertIn("set_active_config(cfg)", text)
+
+
+class ActionTermAbcTests(unittest.TestCase):
+    def test_action_term_implements_every_abstract_property(self):
+        # The server's ActionTerm ABC requires these; without them the env could not be built.
+        text = (Path(__file__).resolve().parents[1] / "my_package" / "embodiments" / "yam_bimanual.py").read_text()
+        for name in ("action_dim", "raw_actions", "processed_actions"):
+            self.assertRegex(text, rf"@property\n    def {name}\(self\)")
+        for name in ("process_actions", "apply_actions"):
+            self.assertIn(f"def {name}(self", text)

@@ -134,6 +134,15 @@ class YamBimanualAction(ActionTerm):
     def action_dim(self) -> int:
         return ACTION_DIM
 
+    # Required by Isaac Lab's ActionTerm ABC; missing them aborted the server launch.
+    @property
+    def raw_actions(self) -> torch.Tensor:
+        return self._raw_actions
+
+    @property
+    def processed_actions(self) -> torch.Tensor:
+        return self._processed_actions
+
     def process_actions(self, actions: torch.Tensor):
         self._raw_actions[:] = actions
         self._processed_actions[:] = actions
@@ -163,6 +172,32 @@ class YamBimanualActionCfg(ActionTermCfg):
     home_arm_rad: tuple[float, float, float, float, float, float] = (0.4, 1.2, 1.0, -0.5, 0.0, 0.0)
     finger_open_m: float = -0.04695
     finger_closed_m: float = 0.0
+
+
+def _observation_cfg(arm_assets: list[str]):
+    """A ``policy`` group like chess-mate's: last action plus each arm's joint positions.
+
+    Without it the environment had an empty ObservationCfg, which a real policy cannot use.
+    """
+    import isaaclab.envs.mdp as mdp
+    from isaaclab.managers import ObservationGroupCfg as ObsGroup
+    from isaaclab.managers import ObservationTermCfg as ObsTerm
+    from isaaclab.managers import SceneEntityCfg
+    from isaaclab_arena.utils.configclass import make_configclass
+
+    terms = [("actions", ObsTerm, ObsTerm(func=mdp.last_action))]
+    for name in arm_assets:
+        terms.append(
+            (f"joint_pos_{name}", ObsTerm, ObsTerm(func=mdp.joint_pos_rel, params={"asset_cfg": SceneEntityCfg(name)}))
+        )
+    policy_cls = make_configclass("PolicyCfg", terms, bases=(ObsGroup,))
+
+    def post_init(self):
+        self.enable_corruption = False
+        self.concatenate_terms = False
+
+    policy_cls.__post_init__ = post_init
+    return make_configclass("ObservationsCfg", [("policy", policy_cls, policy_cls())])()
 
 
 class YamBimanualEmbodiment(EmbodimentBase):
@@ -241,6 +276,8 @@ class YamBimanualEmbodiment(EmbodimentBase):
             finger_closed_m=robot.finger_closed_m,
         )
         self.action_config = make_configclass("YamActionsCfg", [("yam_action", ActionTermCfg, action)])()
+        arm_assets = ["left_robot", "right_robot"] if robot.layout == "duplicated_single_arm" else ["robot"]
+        self.observation_config = _observation_cfg(arm_assets)
         self.event_config = make_configclass(
             "YamEventsCfg",
             [("reset_all", EventTermCfg, EventTermCfg(func=reset_all_articulation_joints, mode="reset"))],
