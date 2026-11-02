@@ -259,7 +259,7 @@ def main() -> None:
         scorer["snapshot"], scorer["report"] = score_step(cfg, observed, dt)
         return scorer["report"]
 
-    def advance(seconds: float, *, force_z=0.0, torque_fn=None, released=True, until=None, render_frames=False):
+    def advance(seconds: float, *, force_z=0.0, torque_fn=None, released=True, until=None, render_frames=False, sample_every=6):
         samples = []
         for index in range(max(1, int(seconds / dt))):
             state = read()
@@ -271,7 +271,7 @@ def main() -> None:
             fixture.update(dt)
             state = read()
             result = score(state, released)
-            if index % 6 == 0:
+            if index % sample_every == 0:
                 samples.append(
                     {
                         "t": round(index * dt, 3),
@@ -359,9 +359,19 @@ def main() -> None:
         # 20 degrees clockwise past the ridge start, 0.5 mm above where the pins would land.
         start_gap = travel - f.pitch_m * 20.0 / 360.0
         place(start_gap + 0.0005, 20.0)
+        placed = read()
         scorer["snapshot"] = None
-        state, samples = advance(0.75)
-        return {**summary(state), "expected_gap_mm": round(start_gap * 1000, 4), "samples": samples[-4:]}
+        # Every step for the first 0.1 s: the 0afbd1a run only kept the last samples, by which
+        # time the nut had already dropped ~7.5 mm past the ridge.
+        early_state, early = advance(0.1, sample_every=1)
+        state, samples = advance(0.65)
+        return {
+            **summary(state),
+            "expected_gap_mm": round(start_gap * 1000, 4),
+            "placed_gap_mm": round(placed["gap_m"] * 1000, 4),
+            "first_0.1s": early,
+            "samples": samples[-4:],
+        }
 
     engaged = _stage(report, "engage", engage)
 
