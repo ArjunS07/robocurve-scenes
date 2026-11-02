@@ -495,7 +495,8 @@ class GeometryTests(unittest.TestCase):
             self.assertIn("PhysicsMaterialAPI", text)
             self.assertIn("material:binding:physics", text)
             self.assertIn(f"staticFriction = {cfg.fastener.static_friction:.8f}", text)
-            self.assertIn("solverPositionIterationCount = 16", text)
+            self.assertIn("solverPositionIterationCount = 32", text)
+        self.assertIn("maxDepenetrationVelocity = 0.05", text)
             self.assertIn("solverVelocityIterationCount = 1", text)
             # Every collider applies PhysxCollisionAPI, so its contactOffset is honoured.
             self.assertEqual(text.count('"PhysicsCollisionAPI", "PhysxCollisionAPI"'), text.count("PhysicsCollisionAPI"))

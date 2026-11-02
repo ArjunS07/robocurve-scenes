@@ -83,8 +83,11 @@ grasp:
 
 physics:
   contact_offset_m: 0.0003
-  solver_position_iterations: 16
+  # 32 as in Isaac Lab's Factory nut. With 16 the thread held only at 2 mN m (c715f9a sweep).
+  solver_position_iterations: 32
   solver_velocity_iterations: 1
+  # Gentle depenetration: uncapped, the nut was flung ~0.7 m at 5 mN m.
+  max_depenetration_velocity_m_s: 0.05
 
 robot:
   # Absolute path of the shared converted asset; YAM_USD overrides it. Not edited by this package.

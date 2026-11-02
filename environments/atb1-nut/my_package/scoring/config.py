@@ -86,6 +86,9 @@ class PhysicsSpec:
     contact_offset_m: float
     solver_position_iterations: int
     solver_velocity_iterations: int
+    # Caps how fast PhysX pushes overlapping bodies apart. Uncapped, a 5 g nut was flung
+    # ~0.7 m when driven at 5 mN m (server sweep at c715f9a).
+    max_depenetration_velocity_m_s: float
 
 
 @dataclass(frozen=True)
@@ -282,7 +285,7 @@ def parse_config(data: dict) -> NutThreadingConfig:
     physics_data = _mapping(root["physics"], "physics")
     _exact_keys(
         physics_data,
-        ("contact_offset_m", "solver_position_iterations", "solver_velocity_iterations"),
+        ("contact_offset_m", "solver_position_iterations", "solver_velocity_iterations", "max_depenetration_velocity_m_s"),
         "physics",
     )
     robot_data = _mapping(root["robot"], "robot")
@@ -373,6 +376,9 @@ def parse_config(data: dict) -> NutThreadingConfig:
             solver_position_iterations=int(_number(physics_data["solver_position_iterations"], "physics.solver_position_iterations")),
             solver_velocity_iterations=int(
                 _number(physics_data["solver_velocity_iterations"], "physics.solver_velocity_iterations")
+            ),
+            max_depenetration_velocity_m_s=_number(
+                physics_data["max_depenetration_velocity_m_s"], "physics.max_depenetration_velocity_m_s"
             ),
         ),
         robot=RobotSpec(
@@ -474,8 +480,10 @@ def validate_config(config: NutThreadingConfig) -> None:
         raise ValueError("robot.usd_path must be absolute so launching does not depend on the working directory")
     if config.robot.finger_open_m >= 0.0 or config.robot.finger_closed_m != 0.0:
         raise ValueError("finger open is negative and finger closed is zero")
-    if config.physics.solver_position_iterations != 16 or config.physics.solver_velocity_iterations != 1:
-        raise ValueError("solver iterations must be 16 position and 1 velocity")
+    if config.physics.solver_position_iterations < 16 or config.physics.solver_velocity_iterations < 1:
+        raise ValueError("solver iterations must be at least 16 position and 1 velocity")
+    if not 0.0 < config.physics.max_depenetration_velocity_m_s <= 1.0:
+        raise ValueError("max_depenetration_velocity_m_s must be in (0, 1] m/s")
     names = [camera.name for camera in config.cameras]
     if names != ["overhead", "front", "side"]:
         raise ValueError(f"cameras must be overhead, front, side in that order, got {names}")

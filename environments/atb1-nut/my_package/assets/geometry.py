@@ -349,6 +349,7 @@ def _rigid_body_lines(mass_kg: float, material_path: str, cfg: NutThreadingConfi
         f"    float physics:mass = {_fmt(mass_kg)}",
         f"    int physxRigidBody:solverPositionIterationCount = {physics.solver_position_iterations}",
         f"    int physxRigidBody:solverVelocityIterationCount = {physics.solver_velocity_iterations}",
+        f"    float physxRigidBody:maxDepenetrationVelocity = {_fmt(physics.max_depenetration_velocity_m_s)}",
         f"    rel material:binding:physics = <{material_path}>",
     ]
 
