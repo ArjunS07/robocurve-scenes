@@ -287,7 +287,7 @@ def main() -> None:
     pad_local = {}
 
     def measure_pads(side):
-        """Centre of each finger's geometry in that finger body's own frame.
+        """Contact point near each fingertip, in that finger body's own frame.
 
         The finger bodies' origins are not at the pads: closed fingers' origins were 72 mm
         apart (b01e670). Local bounds do not depend on the stale world transforms USD keeps
@@ -298,13 +298,36 @@ def main() -> None:
         stage = sim.stage if hasattr(sim, "stage") else sim_utils.get_current_stage()
         cache = UsdGeom.BBoxCache(Usd.TimeCode.Default(), ["default", "render", "guide"])
         root = stage.GetPrimAtPath("/World/RobotLeft" if side == "left" else "/World/RobotRight")
-        centres = []
-        for tip in ("tip_left", "tip_right"):
+        pos = _tensor(robots[side].data.body_pos_w)[0]
+        quat = _tensor(robots[side].data.body_quat_w)[0]
+        gripper_pos = pos[arm[side]["gripper"]]
+        points, report = [], {}
+        for k, tip in enumerate(("tip_left", "tip_right")):
             prim = next(p for p in Usd.PrimRange(root, Usd.TraverseInstanceProxies()) if p.GetName() == tip)
             rng = cache.ComputeRelativeBound(prim, prim).ComputeAlignedRange()
-            centres.append(torch.tensor([float(v) for v in rng.GetMidpoint()], device=device))
-        pad_local[side] = centres
-        return [[round(1000 * float(v), 1) for v in c] for c in centres]
+            mid = torch.tensor([float(v) for v in rng.GetMidpoint()], device=device)
+            half = torch.tensor([float(v) for v in (rng.GetMax() - rng.GetMin())], device=device) / 2.0
+            # The fingers are long: steering the mesh centre left the pads ~40 mm above the cell
+            # (cc2d125). Use the end of the finger's longest axis that lies farther from the
+            # gripper body, stepped back 6 mm onto the contact area.
+            axis = int(torch.argmax(half))
+            body = arm[side]["tips"][k]
+            rot = quat_to_rot(quat[body].tolist())
+            ends = []
+            for sign in (1.0, -1.0):
+                local = mid.clone()
+                local[axis] = mid[axis] + sign * (half[axis] - 0.006)
+                world = pos[body] + rot @ local
+                ends.append((float(torch.linalg.norm(world - gripper_pos)), local))
+            tip_local = max(ends, key=lambda item: item[0])[1]
+            points.append(tip_local)
+            report[tip] = {
+                "mesh_centre_mm": [round(1000 * float(v), 1) for v in mid],
+                "length_mm": round(2000 * float(half[axis]), 1),
+                "contact_point_mm": [round(1000 * float(v), 1) for v in tip_local],
+            }
+        pad_local[side] = points
+        return report
 
     def pad_centres(side):
         pos = _tensor(robots[side].data.body_pos_w)[0]
@@ -498,12 +521,23 @@ def main() -> None:
         out["table_top_mm"] = round(1000 * cfg.table.top_z_m, 1)
         return out
 
+    def reset_cells():
+        for cell_name, cell in cells.items():
+            start = battery_pose(cfg, cell_name)
+            pose = torch.tensor([[*start.position_xyz, *start.rotation_xyzw]], device=device, dtype=torch.float32)
+            cell.write_root_pose_to_sim(pose)
+            cell.write_root_velocity_to_sim(torch.zeros((1, 6), device=device))
+        step(int(0.3 / dt))
+
     def grasp_cells():
         rows = {}
         for name, cell in cells.items():
             pose = battery_pose(cfg, name)
             x, y, z = pose.position_xyz
             side = nearer_arm((x, y))
+            # The reach stages knocked battery_b ~100 mm off its mat (cc2d125); start each grasp
+            # with both cells back on their marks.
+            reset_cells()
             finger_cmd[side] = cfg.robot.finger_open_m
             above = reach(side, (x, y, z + args.approach_m), orient=True)
             at = reach(side, (x, y, z), orient=True)
