@@ -12,6 +12,16 @@ import sys
 from uuid import uuid4
 
 
+def create_agent_policy(model, max_llm_calls, *, transport=None, env=None):
+    """One tested configuration for the installed Inspect agent's Chat wire."""
+    from inspect_robots_agent.policy import LLMAgentPolicy
+    return LLMAgentPolicy(model=model, base_url='https://openrouter.ai/api/v1',
+                          api_key_env='OPENROUTER_API_KEY', wire='chat', images='always',
+                          depth='off', wire_capture=False, effort='low', max_retries=1,
+                          max_llm_calls=max_llm_calls, transcript_echo=True,
+                          transport=transport, env=env)
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--scene', choices=('chess-mate', 'battery-remote', 'atb1-nut'), required=True)
@@ -42,6 +52,9 @@ def main():
         os.environ['OPENROUTER_API_KEY'] = getpass.getpass('OpenRouter API key (hidden, not saved): ').strip()
         if not os.environ['OPENROUTER_API_KEY']:
             parser.error('An OpenRouter key is required for agent mode')
+    # Validate the exact provider settings before spending time starting Kit.
+    # This constructor does not make a completion request.
+    policy = create_agent_policy(args.model, args.max_llm_calls) if args.mode == 'agent' else None
     # Import torch before Arena. Other adapter modules are numpy/Inspect-only.
     import torch
     from inspect_robots import Action, Scene, Task, eval, success_at_end
@@ -75,11 +88,6 @@ def main():
     with open_scene(args, output) as (adapter, instruction):
         scene = Scene(id=args.scene, instruction=instruction)
         if args.mode == 'agent':
-            policy = LLMAgentPolicy(model=args.model, base_url='https://openrouter.ai/api/v1',
-                                    api_key_env='OPENROUTER_API_KEY', wire='chat', images='always',
-                                    depth='off', wire_capture=False, effort='low', max_retries=1,
-                                    max_llm_calls=args.max_llm_calls, max_output_tokens=2048,
-                                    transcript_echo=True)
             max_episode = max(1, math.ceil(float(adapter.base.cfg.episode_length_s) * adapter.info.control_hz))
             task = Task(name=args.scene, scenes=[scene], scorer=[ArenaTaskScore(), success_at_end()],
                         max_steps=min(args.steps, max_episode))

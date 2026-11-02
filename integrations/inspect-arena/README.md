@@ -56,7 +56,7 @@ Client: server `global.prd.ga.run.brev.nvidia.com`, signal `24317`, stream `2833
 
 This is actual model-driven simulated motion. It uses `google/gemini-4-argon`, explicitly routed to `https://openrouter.ai/api/v1`, the `OPENROUTER_API_KEY` variable, and the Chat Completions wire. If the key is absent it prompts in an interactive terminal with hidden input and does not save it. Do not put the key into command-line arguments or source.
 
-All three RGB images are sent on each policy decision. The agent has a three-call budget by default, at most 2048 output tokens per request, and one HTTP attempt per completion. The limit on environment steps can truncate a motion chunk. The result is a bring-up trial, not the full task benchmark.
+All three RGB images are sent on each policy decision. The agent has a three-call budget by default and one HTTP attempt per completion. This SDK does not support an output-token cap on its Chat wire, so no per-request token cap is claimed. The exact policy configuration is validated before Kit starts. The limit on environment steps can truncate a motion chunk. The result is a bring-up trial, not the full task benchmark.
 
 Inspect logs, frame sidecars and agent transcripts go into the run's `inspect/` directory. The default upstream policy retains its provider-specific tool metadata between calls.
 

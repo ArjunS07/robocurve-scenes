@@ -200,7 +200,7 @@ class TerminalTests(unittest.TestCase):
 class AgentContractTests(unittest.TestCase):
     def test_real_agent_binds_and_emits_only_left_gripper_motion(self):
         import httpx
-        from inspect_robots_agent.policy import LLMAgentPolicy
+        from run_inspect import create_agent_policy
         env, adapter, obs = setup()
         requests = []
         def respond(request):
@@ -211,10 +211,9 @@ class AgentContractTests(unittest.TestCase):
                     'name': 'move_joints', 'arguments': json.dumps({'targets': {'left_gripper_open': 0.9},
                     'note': 'Test the left gripper while the right holds position.'})}}]}}],
                 'usage': {'prompt_tokens': 1, 'completion_tokens': 1, 'total_tokens': 2}})
-        policy = LLMAgentPolicy(model='google/gemini-4-argon', base_url='https://openrouter.ai/api/v1',
-            api_key_env='OPENROUTER_API_KEY', env={'OPENROUTER_API_KEY': 'offline-test'},
-            transport=httpx.MockTransport(respond), max_llm_calls=1, max_retries=1,
-            wire_capture=False, depth='off')
+        # Use the launcher's actual options, not a separate approximation of them.
+        policy = create_agent_policy('google/gemini-4-argon', 1,
+            env={'OPENROUTER_API_KEY': 'offline-test'}, transport=httpx.MockTransport(respond))
         policy.bind(adapter.info)
         policy.reset(Scene('test', 'Test only the left gripper'))
         chunk = policy.act(obs)
@@ -227,6 +226,12 @@ class AgentContractTests(unittest.TestCase):
             adapter.step(action)
         self.assertAlmostEqual(chunk.actions[-1].data[6], 0.9)
         self.assertEqual(policy.config.base_url, 'https://openrouter.ai/api/v1')
+        self.assertEqual(requests[0]['model'], 'google/gemini-4-argon')
+        self.assertEqual(requests[0]['reasoning_effort'], 'low')
+        self.assertEqual(policy.config.wire, 'chat')
+        self.assertIsNone(policy.config.max_output_tokens)
+        self.assertEqual(policy.config.max_llm_calls, 1)
+        self.assertEqual(policy.config.max_retries, 1)
 
 
     def test_real_inspect_eval_preserves_partial_task_score_and_failure_status(self):
