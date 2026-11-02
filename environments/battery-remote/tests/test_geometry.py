@@ -148,7 +148,11 @@ class GeometryTests(unittest.TestCase):
         self.assertIn("PhysicsCollisionAPI", battery)
         self.assertNotIn("PhysicsCollisionAPI", battery.split('def Cylinder "positive_nub"')[1])
         self.assertNotIn("PhysicsRigidBodyAPI", marks)
-        self.assertNotIn("PhysicsCollisionAPI", marks)
+        self.assertNotIn("Joint", marks)
+        # Only the two battery mats collide (flat static rests); the remote mark is visual.
+        self.assertEqual(marks.count("PhysicsCollisionAPI"), 2)
+        self.assertNotIn("PhysicsCollisionAPI", marks.split('def Cube "remote_mark"')[1].split("def Cube")[0])
+        self.assertIn("physxRigidBody:angularDamping", battery)
         self.assertIn("battery_a_mark", marks)
         self.assertIn("battery_b_mark", marks)
 
@@ -208,6 +212,11 @@ class GeometryTests(unittest.TestCase):
         self.assertNotIn("physics_material=", spawn)
         # A sleeping remote ignored spring-drive targets on the server; it must never sleep.
         self.assertIn("ArticulationRootPropertiesCfg(sleep_threshold=0.0, stabilization_threshold=0.0)", spawn)
+
+    def test_cells_start_resting_on_their_flat_mats(self):
+        mat = self.cfg.battery.start_mat_thickness_m
+        for pose in (self.cfg.battery_a_pose, self.cfg.battery_b_pose):
+            self.assertAlmostEqual(pose.position_xyz[2], self.cfg.table.top_z_m + mat + self.cfg.battery.diameter_m / 2.0)
 
     def test_plunger_joints_author_a_linear_drive(self):
         with tempfile.TemporaryDirectory() as directory:

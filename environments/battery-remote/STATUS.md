@@ -10,11 +10,18 @@ Isaac Lab 17.0.2 / Kit 110.3 on the L40S, via `environments/tools/probe_runtime.
 - `maple_table_robolab` spawns at the origin; collision top z = 0.003; footprint x [0.1986, 0.8986], y [-0.4779, 0.5221].
 - YAM USDA: fixed-base single arm (`root_joint` is a `PhysicsFixedJoint` from the `/yam` Xform to the `base` rigid body, which carries `ArticulationRootAPI`), joints `joint1`..`joint8`, bodies `base`, `link1`..`link5`, `gripper`, `tip_left`, `tip_right`. Correction: the YAM USDA does carry collision geometry: 9 colliders per arm, inside instanced link prims (server run c4f4e56). An earlier scan that did not enter instances reported 0, which was wrong. All 9 are enabled (chess-mate ed6aa50 run). The spawn hook only adds colliders to meshes that lack one, so it currently adds none.
 - `UsdFileCfg` accepts `physics_material` (the chess scene passes it and ran). The earlier note here that it is "not a file-spawner field" was wrong. This package still authors friction as USD physics materials, which also works; nothing depends on the spawner field.
-- Startup at `30f984e` failed: `fix_root_link=True` cannot be applied when `ArticulationRootAPI` sits on a non-rigid Xform. That is fixed below; **the fix has not been run on the server yet.**
+- Startup at `30f984e` failed: `fix_root_link=True` cannot be applied when `ArticulationRootAPI` sits on a non-rigid Xform. Fixed by the YAM-style `root_joint` below.
+- `tools/physics_check.py` at `bc99711` (scripted cell poses, no robot):
+  - **Fixture holds**: the remote moves 0.004 mm through settle, insertion, and disturbance. Isaac Lab reports `is_fixed_base: false` (the fixed joint is not counted as part of the articulation), but the chassis does not move.
+  - **Springs work**: with no cell, each plunger follows a 3.92 mm target and returns to 0 within ~0.2 s after release. Before `5332b00` the hand-written prismatic joints had no `PhysicsDriveAPI`, so PhysX applied no drive even though Isaac Lab reported the gains; a sleeping articulation was ruled out first (sleep is now disabled anyway).
+  - **Insertion and retention in both slots**: a cell lowered into either slot and released ends seated (axial offset 0.00 mm, spring contact, 1.46 mm compression against the 1.5 mm design preload) and stays seated through a 0.05 m/s lateral kick.
+  - **Polarity**: a reversed cell sits in the slot touching the spring but is not counted as seated.
+  - **Open top**: a 0.6 m/s upward pull lifts the cell out, as expected with the cover removed.
+  - **Not yet fixed there**: before insertion, battery_b rolled ~20 mm in 2 s on the bare table (still accelerating, so that patch of the table collider is not level). The cells now start on flat 1 mm static mats with light rolling damping; **not yet re-run.**
 
 ## Code-checked (not physics)
 
-`python3 tests/run_pure_tests.py`: 79 tests, OK (1 skipped here because `pxr` is not installed; it passes with `usd-core`).
+`python3 tests/run_pure_tests.py`: 86 tests, OK (1 skipped here because `pxr` is not installed; it passes with `usd-core`).
 
 - **Fixture.** Authored like the YAM asset: `chassis` is the root rigid body with `PhysicsArticulationRootAPI`; `root_joint` (`PhysicsFixedJoint`) goes from the enclosing `remote` Xform (not a rigid body, so the world) to `chassis`. The spawner no longer requests `fix_root_link`. Plunger links are rigid bodies nested under `chassis` (YAM nests its links the same way). Composed under `/World/envs/env_0/remote`: one articulation root, on the chassis; every joint target resolves; three rigid bodies.
 - **Appearance** (likeness of ASIN B07T4N7NTX). MEASURED from the listing: 23.5 × 4.8 × 2.4 cm, black ABS, two AAA. ESTIMATED: everything about the bay (the front photo shows no compartment), the 46 mm bay-block width and 22 mm height, edge fillet 4 mm, end radius 12 mm.

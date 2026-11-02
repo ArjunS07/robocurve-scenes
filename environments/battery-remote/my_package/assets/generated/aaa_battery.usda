@@ -12,6 +12,7 @@ def Xform "battery" (
 )
 {
     float physics:mass = 0.0115
+    float physxRigidBody:angularDamping = 0.5
     rel material:binding:physics = </battery/physics_material>
     def Material "physics_material" (
         prepend apiSchemas = ["PhysicsMaterialAPI"]

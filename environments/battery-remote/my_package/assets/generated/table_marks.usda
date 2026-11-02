@@ -3,7 +3,7 @@
     defaultPrim = "marks"
     metersPerUnit = 1
     upAxis = "Z"
-    doc = "Visual table marks only. No physics, no collision, no joints."
+    doc = "Table marks. The remote mark is visual; each battery mark is a flat static 1 mm mat with collision. No rigid bodies, no joints."
 )
 
 def Xform "marks"
@@ -16,20 +16,26 @@ def Xform "marks"
         uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:scale"]
         color3f[] primvars:displayColor = [(0.1, 0.45, 0.2)]
     }
-    def Cube "battery_a_mark"
+    def Cube "battery_a_mark" (
+        prepend apiSchemas = ["PhysicsCollisionAPI"]
+    )
     {
         double size = 1
         double3 xformOp:translate = (0.57, -0.09, 0.0035)
-        float3 xformOp:scale = (0.0505, 0.0165, 0.0004)
+        float3 xformOp:scale = (0.0505, 0.0165, 0.001)
         uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:scale"]
         color3f[] primvars:displayColor = [(0.1, 0.35, 0.55)]
+        float physxCollision:contactOffset = 0.0003
     }
-    def Cube "battery_b_mark"
+    def Cube "battery_b_mark" (
+        prepend apiSchemas = ["PhysicsCollisionAPI"]
+    )
     {
         double size = 1
         double3 xformOp:translate = (0.57, 0.09, 0.0035)
-        float3 xformOp:scale = (0.0505, 0.0165, 0.0004)
+        float3 xformOp:scale = (0.0505, 0.0165, 0.001)
         uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:scale"]
         color3f[] primvars:displayColor = [(0.1, 0.35, 0.55)]
+        float physxCollision:contactOffset = 0.0003
     }
 }

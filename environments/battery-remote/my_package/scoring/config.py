@@ -27,6 +27,10 @@ class BatteryGeometry:
     static_friction: float
     dynamic_friction: float
     restitution: float
+    # Light rolling damping so a cell lying on its side does not roll away from a nudge.
+    angular_damping: float
+    # Each start mark is a flat static mat this thick; cells rest on it, not on the table mesh.
+    start_mat_thickness_m: float
 
 
 @dataclass(frozen=True)
@@ -277,10 +281,15 @@ def validate(cfg: BatteryInsertionConfig) -> None:
         if abs(abs(axis[0]) - 1.0) > 1e-9 or abs(axis[1]) > 1e-9 or abs(axis[2]) > 1e-9:
             problems.append(f"{slot.name} required_axis_xyz must be +X or -X, got {axis}")
     radius = cfg.battery.diameter_m / 2.0
-    if abs(cfg.battery_a_pose.position_xyz[2] - (cfg.table.top_z_m + radius)) > 1e-6:
-        problems.append("battery_a start z must be table top plus the battery radius")
-    if abs(cfg.battery_b_pose.position_xyz[2] - (cfg.table.top_z_m + radius)) > 1e-6:
-        problems.append("battery_b start z must be table top plus the battery radius")
+    rest_z = cfg.table.top_z_m + cfg.battery.start_mat_thickness_m + radius
+    if abs(cfg.battery_a_pose.position_xyz[2] - rest_z) > 1e-6:
+        problems.append("battery_a start z must be table top plus the start mat plus the battery radius")
+    if abs(cfg.battery_b_pose.position_xyz[2] - rest_z) > 1e-6:
+        problems.append("battery_b start z must be table top plus the start mat plus the battery radius")
+    if not 0.0 < cfg.battery.start_mat_thickness_m <= 0.003:
+        problems.append("start_mat_thickness_m must be in (0, 3 mm]")
+    if cfg.battery.angular_damping < 0.0:
+        problems.append("angular_damping must be non-negative")
     half_height = cfg.compartment.size_xyz[2] / 2.0
     if abs(cfg.remote_pose.position_xyz[2] - (cfg.table.top_z_m + half_height)) > 1e-6:
         problems.append("remote start z must be table top plus half the remote height")

@@ -149,6 +149,8 @@ def main() -> None:
     # Arena spawns the table at the origin with no pose (measured by tools/probe_runtime.py).
     for prim_path, spawn_cfg in (
         ("/World/table", sim_utils.UsdFileCfg(usd_path=maple_table_usd(MapleTableRobolab.usd_path))),
+        # Table marks, as in the environment: the battery marks are flat static mats the cells rest on.
+        ("/World/table_marks", sim_utils.UsdFileCfg(usd_path=str(paths["marks"]))),
         ("/World/dome", sim_utils.DomeLightCfg(intensity=cfg.light_intensity)),
         ("/World/sun", sim_utils.DistantLightCfg(intensity=2500.0, angle=1.0)),
     ):

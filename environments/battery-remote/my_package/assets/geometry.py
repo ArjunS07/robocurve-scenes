@@ -849,6 +849,7 @@ def Xform "battery" (
 )
 {{
     float physics:mass = {_fmt(battery.mass_kg)}
+    float physxRigidBody:angularDamping = {_fmt(battery.angular_damping)}
     rel material:binding:physics = </battery/physics_material>
 {material}
     def Cylinder "body" (
@@ -889,24 +890,27 @@ def _marks_usda(cfg: BatteryInsertionConfig) -> str:
             (0.1, 0.45, 0.2),
         )
     ]
+    mats = []
+    mat = cfg.battery.start_mat_thickness_m
     for name in cell_names(cfg):
         pose = battery_pose(cfg, name)
-        marks.append(
+        # A flat static collider: the cell rests on this, not on the uneven table mesh.
+        mats.append(
             Box(
                 f"{name}_mark",
-                (pose.position_xyz[0], pose.position_xyz[1], top),
-                (cfg.battery.length_m + 0.006, cfg.battery.diameter_m + 0.006, 0.0004),
-                False,
+                (pose.position_xyz[0], pose.position_xyz[1], cfg.table.top_z_m + mat / 2.0),
+                (cfg.battery.length_m + 0.006, cfg.battery.diameter_m + 0.006, mat),
+                True,
                 (0.1, 0.35, 0.55),
             )
         )
-    cubes = "\n".join(_cube(mark, False) for mark in marks)
+    cubes = "\n".join([_cube(mark, False) for mark in marks] + [_cube(mark, True) for mark in mats])
     return f"""#usda 1.0
 (
     defaultPrim = "marks"
     metersPerUnit = 1
     upAxis = "Z"
-    doc = "Visual table marks only. No physics, no collision, no joints."
+    doc = "Table marks. The remote mark is visual; each battery mark is a flat static 1 mm mat with collision. No rigid bodies, no joints."
 )
 
 def Xform "marks"

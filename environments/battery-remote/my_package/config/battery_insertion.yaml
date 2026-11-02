@@ -20,6 +20,11 @@ battery:
   static_friction: 0.40
   dynamic_friction: 0.30
   restitution: 0.0
+  # On the server (942249a) a cell lying on the maple table rolled ~20 mm in 2 s and was still
+  # speeding up, so that patch of the table collider is not level. The start marks are now flat
+  # 1 mm static mats (a printed, taped-down mark), and cells get light rolling damping.
+  angular_damping: 0.5
+  start_mat_thickness_m: 0.001
 
 compartment:
   # Reference: Angrox LG-style replacement remote, ASIN B07T4N7NTX.
@@ -117,10 +122,10 @@ remote_pose:
   position_xyz: [0.57, 0.00, 0.014]
   rotation_xyzw: [0.0, 0.0, 0.0, 1.0]
 battery_a_pose:
-  position_xyz: [0.57, -0.090, 0.00825]
+  position_xyz: [0.57, -0.090, 0.00925]
   rotation_xyzw: [0.0, 0.7071067811865475, 0.0, 0.7071067811865476]
 battery_b_pose:
-  position_xyz: [0.57, 0.090, 0.00825]
+  position_xyz: [0.57, 0.090, 0.00925]
   rotation_xyzw: [0.0, 0.7071067811865475, 0.0, 0.7071067811865476]
 
 cameras:
