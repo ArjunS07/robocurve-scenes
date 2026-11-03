@@ -12,7 +12,7 @@ gripper body's linear Jacobian (position only):
 
 - above and at each cell, and above each slot's seat
 - a grasp attempt on each cell: open, descend, close, lift 5 cm, and check that the
-  cell came up with the fingers; a miss is retried from home with joint1 mirrored
+  cell came up with the fingers
 - a robot insertion: grasp a cell, tilt it, dip its negative end into the slot, push the
   spring plunger in, release, and apply the scorer's seated test
 
@@ -567,15 +567,24 @@ def main() -> None:
         x, y, z = battery_pose(cfg, name).position_xyz
         finger_cmd[side] = cfg.robot.finger_open_m
         above = reach(side, (x, y, z + args.approach_m), orient=True)
-        at = reach(side, (x, y, z), orient=True)
-        boxes = _stage({}, "boxes", lambda: grasp_geometry(side, name))
-        finger_cmd[side] = cfg.robot.finger_closed_m
-        step(int(1.0 / dt))
-        fingers = [round(float(_tensor(robots[side].data.joint_pos)[0, j]), 4) for j in arm[side]["fingers"]]
-        pads_after = pad_centres(side)
-        pad_gap_mm = round(1000 * float(torch.linalg.norm(pads_after[0] - pads_after[1])), 1)
-        start_z = float(_tensor(cell.data.root_pos_w)[0, 2])
-        reach(side, (x, y, z + 0.05), orient=True)
+        # Re-measure the Jacobian here, in free air, for the descent. Recalibrating at the cell
+        # instead flicked both cells off the table (252e198), so nothing near the cell retries.
+        saved_jac, saved_layout = measured_jac.get(side), layout[side]
+        try:
+            calibrate(side, delta=0.02)
+            at = reach(side, (x, y, z), orient=True, retries=0)
+            boxes = _stage({}, "boxes", lambda: grasp_geometry(side, name))
+            finger_cmd[side] = cfg.robot.finger_closed_m
+            step(int(1.0 / dt))
+            fingers = [round(float(_tensor(robots[side].data.joint_pos)[0, j]), 4) for j in arm[side]["fingers"]]
+            pads_after = pad_centres(side)
+            pad_gap_mm = round(1000 * float(torch.linalg.norm(pads_after[0] - pads_after[1])), 1)
+            start_z = float(_tensor(cell.data.root_pos_w)[0, 2])
+            reach(side, (x, y, z + 0.05), orient=True, retries=0)
+        finally:
+            layout[side] = saved_layout
+            if saved_jac is not None:
+                measured_jac[side] = saved_jac
         rise = float(_tensor(cell.data.root_pos_w)[0, 2]) - start_z
         row = {
             "arm": side,
@@ -602,15 +611,6 @@ def main() -> None:
             home(side)
         return row
 
-    def mirrored_seed(side):
-        """Start from home with joint1 negated. Both arms share one home (0.4 rad yaw), so the
-        right arm starts turned away from its cell; the left arm, which lifted its cell, starts
-        turned toward it."""
-        home(side)
-        j1 = arm[side]["joints"][0]
-        targets[side][0, j1] = -targets[side][0, j1]
-        step(int(1.5 / dt))
-
     def grasp_cells():
         rows = {}
         for name in cells:
@@ -619,12 +619,7 @@ def main() -> None:
             # The reach stages knocked battery_b ~100 mm off its mat (cc2d125); start each grasp
             # with both cells back on their marks.
             reset_cells()
-            row = grasp(name, side)
-            if not row["lifted"]:
-                reset_cells()
-                mirrored_seed(side)
-                row["from_mirrored_seed"] = _stage({}, "row", lambda: grasp(name, side))
-            rows[name] = row
+            rows[name] = grasp(name, side)
         return rows
 
     def cell_axis(name):
@@ -687,6 +682,12 @@ def main() -> None:
 
         reset_cells()
         rows["grasp"] = grasp(name, side, release=False)
+        if not rows["grasp"]["lifted"]:
+            # 252e198 went on with an empty hand and steered nothing.
+            finger_cmd[side] = cfg.robot.finger_open_m
+            home(side)
+            rows["skipped"] = "grasp did not lift the cell"
+            return rows
         # Positive tilt about Y lowers +X; lower the spring end, which is at side_sign * X.
         orient_goal.update(tilt_y_deg=side_sign * args.insert_tilt_deg, approach_weight=1.0)
         try:

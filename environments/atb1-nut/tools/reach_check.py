@@ -648,8 +648,16 @@ def main() -> None:
         cx, cy, cz = state["centre"]
         across = across_for_flats(state["yaw_deg"], preferred_deg)
         finger_cmd[side] = cfg.robot.finger_open_m
-        above = reach(side, (cx, cy, cz + args.grasp_raise_m + args.approach_m), across=across)
+        goal_above = (cx, cy, cz + args.grasp_raise_m + args.approach_m)
+        above = reach(side, goal_above, across=across)
+        if not above["reached"]:
+            # The home Jacobian is a poor start far from home (battery be1f60b); re-measure in free air.
+            calibrate(side, delta=0.02)
+            above = dict(reach(side, goal_above, across=across), recalibrated=True)
         wrist_report = measure_wrist() if wrist["yaw_per_rad"] is None else None
+        # Descend with a Jacobian measured just above the nut: the home one left the pads 29.7 mm
+        # off (252e198). Never recalibrate at the nut itself; the nudges knock it.
+        calibrate(side, delta=0.02)
         at = reach(side, (cx, cy, cz + args.grasp_raise_m), across=across)
         offset_before = [round(1000 * float(v), 1) for v in tip_mid(side) - torch.tensor(nut_state()["centre"], device=device)]
         finger_cmd[side] = cfg.robot.finger_closed_m

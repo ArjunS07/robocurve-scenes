@@ -43,7 +43,7 @@ def battery() -> None:
         if mirrored:
             print("   mirrored:", mirrored if "error" in mirrored else pick(mirrored, keys))
     ins = r.get("insert_cell", {})
-    for k in ("cell", "arm", "slot", "tilt_above", "dip", "push", "after_release", "error", "error_at"):
+    for k in ("cell", "arm", "slot", "skipped", "tilt_above", "dip", "push", "after_release", "error", "error_at"):
         if k in ins:
             print("insert", k, ins[k])
 
