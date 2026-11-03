@@ -43,6 +43,7 @@ def battery() -> None:
         print("grasp", name, pick(row, keys + ("approach_tilt_from_down_deg", "finger_axis_off_world_y_deg", "fingers_stopped_by_cell")))
         print("   before_close", row.get("before_close"))
         print("   after_close", row.get("after_close"), "lift", row.get("lift"), "cell_after_lift", row.get("cell_after_lift_mm"))
+        print("   torque at grasp point", row.get("applied_torque_n_m"))
         mirrored = row.get("from_mirrored_seed")
         if mirrored:
             print("   mirrored:", mirrored if "error" in mirrored else pick(mirrored, keys))

@@ -68,6 +68,7 @@ def main() -> None:
     parser.add_argument("--approach-m", type=float, default=0.08, help="Height above a target for the approach pose.")
     parser.add_argument("--tolerance-m", type=float, default=0.004, help="Fingertip position error that counts as reached.")
     parser.add_argument("--reach-s", type=float, default=4.0, help="Simulated time allowed per target.")
+    parser.add_argument("--grasp-raise-m", type=float, default=0.0015, help="Pinch this far above the cell's axis.")
     parser.add_argument("--insert-tilt-deg", type=float, default=30.0, help="Cell tilt about the finger axis while dipping its spring end into the slot.")
     parser.add_argument("--hold-s", type=float, default=1.5, help="Settle time after releasing the inserted cell.")
     parser.add_argument("--out", type=Path, default=None)
@@ -487,6 +488,9 @@ def main() -> None:
             "start_residual_mm": round(1000 * start_residual, 2),
             "residual_mm": round(1000 * residual, 2),
             "joints_at_limit": at_limit(side),
+            # Drive torque on each arm joint at the end; a value at the effort limit means the
+            # joint is saturated and cannot hold its target (sag the IK cannot remove).
+            "applied_torque_n_m": [round(float(v), 2) for v in _tensor(robots[side].data.applied_torque)[0, arm[side]["joints"]]],
             "target_minus_actual_rad": [
                 round(float(targets[side][0, j] - _tensor(robot.data.joint_pos)[0, j]), 3) for j in joints
             ],
@@ -603,6 +607,11 @@ def main() -> None:
         """Open, descend on the cell with the fingers across it, close, lift 5 cm. One row."""
         cell = cells[name]
         x, y, z = battery_pose(cfg, name).position_xyz
+        # The finger ends reach ~6 mm below the contact points, so pads at the cell's axis put
+        # them 0.75 mm into the 1 mm mat: 211e30d's descents jammed there 20-39 mm off in X.
+        # Pinch 1.5 mm above the axis instead: the contact normal is 17 deg off horizontal,
+        # under the friction angle (atan 0.4 = 22 deg), so the cell is not squeezed out.
+        z = z + args.grasp_raise_m
         finger_cmd[side] = cfg.robot.finger_open_m
         above = reach(side, (x, y, z + args.approach_m), orient=True)
         # Re-measure the Jacobian here, in free air, for the descent. Recalibrating at the cell
@@ -643,6 +652,7 @@ def main() -> None:
             "first_attempt_residual_mm": at.get("first_attempt_residual_mm"),
             "joints_at_limit": at["joints_at_limit"],
             "joint_pos_rad": at["joint_pos_rad"],
+            "applied_torque_n_m": at["applied_torque_n_m"],
             "finger_pos_after_close_m": fingers,
             "fingers_stopped_by_cell": all(abs(f - cfg.robot.finger_closed_m) > 0.002 for f in fingers),
             "cell_rise_mm": round(1000 * rise, 1),

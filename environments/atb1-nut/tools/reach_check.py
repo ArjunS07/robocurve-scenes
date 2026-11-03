@@ -589,6 +589,9 @@ def main() -> None:
             "start_residual_mm": round(1000 * start_residual, 2),
             "residual_mm": round(1000 * residual, 2),
             "joints_at_limit": at_limit(side),
+            # Drive torque on each arm joint at the end; a value at the effort limit means the
+            # joint is saturated and cannot hold its target (sag the IK cannot remove).
+            "applied_torque_n_m": [round(float(v), 2) for v in _tensor(robots[side].data.applied_torque)[0, arm[side]["joints"]]],
             "approach_tilt_from_down_deg": round(tilt, 1),
             "finger_axis_off_target_deg": None if twist is None else round(twist, 1),
         }
@@ -782,7 +785,8 @@ def main() -> None:
             # Coming down from here would strike the bolt, as in a5f5537 and c9c5606.
             raise RuntimeError(
                 f"nut not over the bolt at safe height: radial {1000 * state['radial_m']:.1f} mm, "
-                f"tilt {state['tilt_deg']:.1f} deg, rise residual {rise['residual_mm']} mm, high residual {high['residual_mm']} mm"
+                f"tilt {state['tilt_deg']:.1f} deg, rise residual {rise['residual_mm']} mm, high residual {high['residual_mm']} mm, "
+                f"torque at high {high['applied_torque_n_m']} N m"
             )
         calibrate(side, delta=0.02)  # local Jacobian for the short descent onto the tip
         above = nut_reach((fx, fy, target_centre_z + 0.02))
