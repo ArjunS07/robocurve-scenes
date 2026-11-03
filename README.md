@@ -179,14 +179,14 @@ A reversed or partly seated cell does not count. If a slot's spring joint cannot
 
 ### Nut threading (`nut_score`)
 
-One approximate M8 × 1.25 nut-and-stud station inspired by NIST Assembly Task Board 1 (not the full board or its CAD). The stud carries a physical helical ridge and the nut three pins, so turning the nut drives it down the stud through ordinary contacts.
+An M16 nut-and-bolt station inspired by NIST Assembly Task Board 1 (not the full board or its CAD), using Isaac Lab's Factory M16 nut and bolt (NVIDIA assets, loaded at runtime from the asset bucket into Isaac Lab's `/tmp` cache, not stored in this repo). Their meshes carry real right-hand 2.0 mm threads with SDF collision. The bolt stands in a kinematic fixture block with 16 mm of thread above the plate (8 turns to seat); the plate top is the seat face. The nut starts lying flat on a mat 15 cm away. The earlier procedural M8 thread held only below about 5 mN·m of turning torque, too little for a robot gripper.
 
-The scorer checks each step that rotation and descent stay consistent with the 1.25 mm pitch while the nut is coaxial. If they ever disagree beyond tolerance, the nut is *cross-threaded* until it is backed off or removed.
+The scorer checks each step that rotation and descent stay consistent with the 2.0 mm pitch while the nut is coaxial. If they ever disagree beyond tolerance, the nut is *cross-threaded* until it is backed off or removed.
 
 | Score | Condition |
 | --- | --- |
-| 100 | threaded, seated (within 1 mm of the seat), and released |
-| 75 | threaded through at least 75% of the travel (held or released) |
+| 100 | threaded, seated (within 1 mm of the plate's seat face), and released |
+| 75 | threaded through at least 75% of the 16 mm travel (held or released) |
 | 50 | threaded and released short of 75% |
 | 25 | lifted but not threaded, or threaded short of 75% and still held |
 | 0 | never lifted, or a hard failure: the nut off the table or the fixture moved |
@@ -206,15 +206,10 @@ From each task's `STATUS.md`, which has the details and the code revision each r
   - a cell seats and stays seated after release in either slot;
   - a reversed cell is rejected;
   - cells stay on their marks at the start.
-- **Nut:** in a scripted check (torque applied directly, no robot):
-  - the nut engages the thread;
-  - it advances about 1.15 mm per turn against a 1.25 mm pitch;
-  - it stays in place when released mid-thread.
+- **Nut:** the scene now uses the Factory M16 nut and bolt; this has not yet been run on the server. (The earlier M8 box thread scored 100 in the scripted check only at 2 mN·m.)
 
 Not yet demonstrated for any task:
 
 - a full scored episode through the runner;
 - a robot actually grasping and moving a piece, cell, or nut;
 - policy camera images that track moving bodies (render checks showed stale poses with Fabric on; under investigation).
-
-The nut's continuous advance over several turns is being fixed; it stalled at about 0.4 turns in the last run.

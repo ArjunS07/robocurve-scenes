@@ -1,4 +1,4 @@
-"""Server-side check of the physical M8 thread. Prints one JSON report.
+"""Server-side check of the Factory M16 nut and bolt thread. Prints one JSON report.
 
 Run with the Arena interpreter (starts Kit headless; no Arena runner, no robot):
 
@@ -7,17 +7,19 @@ Run with the Arena interpreter (starts Kit headless; no Arena runner, no robot):
     # physics only, no cameras:
     /home/ubuntu/workspace/IsaacLab-Arena/.venv/bin/python tools/physics_check.py --no-render
 
-It spawns the maple table, the generated kinematic fixture, and the nut, with the
-same USDA the environment uses, at the Arena dt (1/120 s). The robot is replaced
-by a scripted wrench on the nut so the thread itself is tested:
+It fetches Isaac Lab's Factory M16 nut and bolt (Isaac Lab's /tmp cache), and spawns
+the maple table, the kinematic fixture block, the kinematic bolt, and the nut with the
+same USDA the environment uses, at the Arena dt (1/120 s). The robot is replaced by a
+scripted wrench on the nut so the thread itself is tested:
 
-1. settle    - the nut rests on the table, the fixture does not move
-2. engage    - the nut is placed coaxially just above the stud and dropped; its pins land on the ridge
-3. advance   - a clockwise torque turns it N turns; descent per turn must match the 1.25 mm pitch
-4. release   - torque off; a partly threaded nut must stay put (no slide to the seat)
-5. pull      - an upward force of several times its weight must not pull it off the stud
-6. seat      - clockwise again until the collar stops it
-7. back_off  - counter-clockwise until the pins leave the ridge, then the nut lifts free
+1. settle    - the nut lies flat on the start mat; the fixture and bolt do not move
+2. engage    - the nut is placed coaxially just above the bolt tip and dropped onto the thread
+3. advance   - a clockwise torque turns it N turns; descent per turn must match the 2.0 mm pitch
+               (a sweep first tries each torque cap, free and held upright)
+4. release   - torque off; a partly threaded nut must stay put
+5. pull      - an upward force of several times its weight must not pull it off the bolt
+6. seat      - clockwise again until the plate's seat face stops it
+7. back_off  - counter-clockwise until it leaves the thread, then the nut lifts free
 
 Every trajectory sample is also fed to the task scorer, so the report shows the
 score the environment would give (50 while released mid-thread, 100 when seated
@@ -81,7 +83,7 @@ def main() -> None:
         "--max-torque",
         type=float,
         default=0.05,
-        help="Turning-torque cap in N m. The old 2 mN m cap stalled the nut at a seam; a hand or gripper gives far more.",
+        help="Turning-torque cap in N m. The sweep picks the highest cap that tracks the thread.",
     )
     parser.add_argument("--turn-rate", type=float, default=0.25, help="Target turns per second.")
     parser.add_argument(
@@ -97,7 +99,7 @@ def main() -> None:
     )
     parser.add_argument(
         "--torque-sweep",
-        default="0.002,0.005,0.01,0.02,0.05",
+        default="0.01,0.05,0.2,0.5",
         help="Comma-separated torque caps (N m) tried in a sweep before the main stages; '' skips it.",
     )
     parser.add_argument("--width", type=int, default=1280)
@@ -149,26 +151,29 @@ def main() -> None:
     import isaaclab.sim as sim_utils
     from isaaclab.assets import RigidObject, RigidObjectCfg
 
-    from my_package.assets.geometry import (
-        ensure_generated_assets,
-        ridge_start_top_z_m,
-        thread_turns_available,
-    )
-    from my_package.scoring.config import load_config
+    from my_package.assets.factory import resolve_fastener_assets
+    from my_package.assets.geometry import ensure_generated_assets
+    from my_package.scoring.config import bolt_position_xyz, load_config, start_mat_top_z, turns_to_seat
     from my_package.scoring.math3d import angle_deg, rotate
-    from my_package.scoring.scorer import carry_episode_memory, required_travel_m, step as score_step
+    from my_package.scoring.scorer import carry_episode_memory, nut_centre_xyz, required_travel_m, step as score_step
     from my_package.scoring.snapshot import NutSnapshot, SceneSnapshot, clear_episode_state
     from my_package.tasks.state_values import quaternion_xyzw, sim_quaternion
 
     cfg = load_config()
     f = cfg.fastener
     travel = required_travel_m(cfg)
-    nut_usd, fixture_usd = ensure_generated_assets(cfg)
+    nut_asset, bolt_asset = resolve_fastener_assets(cfg)
+    nut_usd, bolt_usd, fixture_usd = ensure_generated_assets(cfg, nut_asset, bolt_asset)
+    # Nut origin to centre along its axis (the Factory origin is below the lower face).
+    centre_up = f.nut_origin_to_lower_face_m + f.nut_height_m / 2.0
+    # Spin about the axis, approximated as a hex ring: bore at the minor radius, flats outside.
+    inertia_zz = 0.5 * f.nut_mass_kg * (f.nut_bore_minor_radius_m**2 + (f.nut_across_flats_m / 2.0) ** 2)
     report["thread"] = {
         "pitch_mm": f.pitch_m * 1000,
         "travel_mm": travel * 1000,
-        "ridge_start_top_mm": ridge_start_top_z_m(cfg) * 1000,
-        "ridge_turns": thread_turns_available(cfg),
+        "turns_to_seat": turns_to_seat(cfg),
+        "nut_inertia_zz_kg_m2": inertia_zz,
+        "assets": {"nut": nut_asset, "bolt": bolt_asset},
     }
 
     dt = 1.0 / 120.0
@@ -192,17 +197,18 @@ def main() -> None:
     if isinstance(table_cfg, sim_utils.GroundPlaneCfg):
         stage.GetPrimAtPath("/World/table").GetAttribute("xformOp:translate").Set((0.0, 0.0, cfg.table.top_z_m))
 
-    def rigid(name, path, pose):
+    def rigid(name, path, position_xyz, rotation_xyzw):
         return RigidObject(
             RigidObjectCfg(
                 prim_path=f"/World/{name}",
                 spawn=sim_utils.UsdFileCfg(usd_path=str(path)),
-                init_state=RigidObjectCfg.InitialStateCfg(pos=tuple(pose.position_xyz), rot=sim_quaternion(pose.rotation_xyzw)),
+                init_state=RigidObjectCfg.InitialStateCfg(pos=tuple(position_xyz), rot=sim_quaternion(rotation_xyzw)),
             )
         )
 
-    fixture = rigid("fixture", fixture_usd, cfg.fixture_pose)
-    nut = rigid("nut", nut_usd, cfg.nut_pose)
+    fixture = rigid("fixture", fixture_usd, cfg.fixture_pose.position_xyz, cfg.fixture_pose.rotation_xyzw)
+    bolt = rigid("bolt", bolt_usd, bolt_position_xyz(cfg), cfg.fixture_pose.rotation_xyzw)
+    nut = rigid("nut", nut_usd, cfg.nut_pose.position_xyz, cfg.nut_pose.rotation_xyzw)
     camera = None
     if render:
         from isaaclab.sensors import Camera, CameraCfg
@@ -246,8 +252,10 @@ def main() -> None:
     scorer = {"snapshot": None, "report": None}
 
     def read():
-        pos = _tensor(nut.data.root_pos_w)[0].cpu().tolist()
         quat = quaternion_xyzw(_tensor(nut.data.root_quat_w)[0])
+        # The nut's centre, as the environment scores it.
+        pos = list(nut_centre_xyz(cfg, _tensor(nut.data.root_pos_w)[0].cpu().tolist(), quat))
+        bpos = _tensor(bolt.data.root_pos_w)[0].cpu().tolist()
         ang = _tensor(nut.data.root_ang_vel_w)[0].cpu().tolist()
         fpos = _tensor(fixture.data.root_pos_w)[0].cpu().tolist()
         fquat = quaternion_xyzw(_tensor(fixture.data.root_quat_w)[0])
@@ -269,6 +277,7 @@ def main() -> None:
             "tilt_deg": angle_deg(rotate(quat, (0.0, 0.0, 1.0)), (0.0, 0.0, 1.0)),
             "clockwise_turns": -track["yaw_unwrapped"] / (2.0 * math.pi),
             "fixture_drift_m": math.dist(fpos, cfg.fixture_pose.position_xyz),
+            "bolt_drift_m": math.dist(bpos, bolt_position_xyz(cfg)),
             "fixture_quat": fquat,
         }
 
@@ -290,17 +299,17 @@ def main() -> None:
         return scorer["report"]
 
     def hold_upright_now():
-        """Ideal grip: remove tilt and tilting spin, keep position, height and spin about the axis.
+        """Ideal grip: remove tilt and tilting spin about the nut's centre, keep its spin about the axis.
 
-        An explicit corrective torque cannot be stiff enough on a 5 g nut at dt = 1/120 s
+        An explicit corrective torque cannot be stiff enough on a 50 g nut at dt = 1/120 s
         without going unstable, so this projects the state instead.
         """
-        pos = _tensor(nut.data.root_pos_w)[0]
         quat = quaternion_xyzw(_tensor(nut.data.root_quat_w)[0])
+        centre = nut_centre_xyz(cfg, _tensor(nut.data.root_pos_w)[0].cpu().tolist(), quat)
         x_axis = rotate(quat, (1.0, 0.0, 0.0))
         yaw = math.atan2(x_axis[1], x_axis[0])
         upright = sim_quaternion((0.0, 0.0, math.sin(yaw / 2.0), math.cos(yaw / 2.0)))
-        pose = torch.tensor([[float(pos[0]), float(pos[1]), float(pos[2]), *upright]], device=device)
+        pose = torch.tensor([[centre[0], centre[1], centre[2] - centre_up, *upright]], device=device)
         vel = _tensor(nut.data.root_vel_w)[0].clone() if hasattr(nut.data, "root_vel_w") else None
         nut.write_root_pose_to_sim(pose)
         if vel is not None:
@@ -318,6 +327,7 @@ def main() -> None:
             sim.step(render=render_frames)
             nut.update(dt)
             fixture.update(dt)
+            bolt.update(dt)
             if args.hold_upright and not released:
                 hold_upright_now()
             state = read()
@@ -340,19 +350,26 @@ def main() -> None:
         return read(), samples
 
     def spin(target_turns_per_s: float):
+        """PI rate control, capped. The proportional gain removes ~30% of the rate error per step
+        for this nut's inertia; the integral builds the torque the thread friction needs, reaching
+        the cap in 0.25 s while the nut is stalled."""
         target = -2.0 * math.pi * target_turns_per_s  # clockwise is negative about +Z
+        kp = 0.3 * inertia_zz / dt
+        integral = {"value": 0.0}
 
         def torque(state):
-            feedforward = 1.5e-4 * math.copysign(1.0, target)
             cap = args.max_torque
-            return max(-cap, min(cap, feedforward + 5e-3 * (target - state["wz"])))
+            error = target - state["wz"]
+            step = cap / 0.25 * (error / abs(target)) * dt
+            integral["value"] = max(-cap, min(cap, integral["value"] + step))
+            return max(-cap, min(cap, kp * error + integral["value"]))
 
         return torque
 
     def place(gap_m: float, clockwise_deg: float):
         yaw = -math.radians(clockwise_deg)
         pose = torch.tensor(
-            [[fx, fy, fz + gap_m + f.nut_height_m / 2.0, *sim_quaternion((0.0, 0.0, math.sin(yaw / 2), math.cos(yaw / 2)))]],
+            [[fx, fy, fz + gap_m - f.nut_origin_to_lower_face_m, *sim_quaternion((0.0, 0.0, math.sin(yaw / 2), math.cos(yaw / 2)))]],
             device=device,
         )
         nut.write_root_pose_to_sim(pose)
@@ -368,6 +385,7 @@ def main() -> None:
             "tilt_deg": round(state["tilt_deg"], 3),
             "radial_mm": round(state["radial_m"] * 1000, 4),
             "fixture_drift_mm": round(state["fixture_drift_m"] * 1000, 4),
+            "bolt_drift_mm": round(state["bolt_drift_m"] * 1000, 4),
             "score": None if scorer["report"] is None else scorer["report"].score,
             "score_reasons": None if scorer["report"] is None else list(scorer["report"].hard_reasons),
         }
@@ -375,7 +393,7 @@ def main() -> None:
     # ---- renders (defined before the trials that call them) --------------------------------------------------------------------
     views = {
         "overview": ((fx + 0.16, fy - 0.16, fz + 0.12), (fx, fy + 0.04, fz)),
-        "close_up": ((fx + 0.035, fy - 0.035, fz + 0.022), (fx, fy, fz + 0.006)),
+        "close_up": ((fx + 0.05, fy - 0.05, fz + 0.035), (fx, fy, fz + 0.008)),
     }
 
     def capture(prefix, names):
@@ -402,23 +420,22 @@ def main() -> None:
     # ---- trials ---------------------------------------------------------------------
     def settle():
         state, _ = advance(1.0)
-        rest = state["pos"][2] - (cfg.table.top_z_m + f.nut_height_m / 2.0)
-        return {**summary(state), "nut_center_above_rest_mm": round(rest * 1000, 3)}
+        rest = state["pos"][2] - (start_mat_top_z(cfg) + f.nut_height_m / 2.0)
+        return {**summary(state), "nut_center_above_rest_mm": round(rest * 1000, 3), "tilt_on_mat_deg": round(state["tilt_deg"], 3)}
 
     _stage(report, "settle", settle)
 
     def engage():
-        # 20 degrees clockwise past the ridge start, 0.1 mm above where the pins would land.
-        start_gap = travel - f.pitch_m * 20.0 / 360.0
-        place(start_gap + 0.0001, 20.0)
+        # Lower face 0.5 mm above the bolt tip; it drops onto the first thread crest.
+        start_gap = travel + 0.0005
+        place(start_gap, 0.0)
         placed = read()
         scorer["snapshot"] = None
-        # Every step for the first 0.1 s: the 0afbd1a run only kept the last samples, by which
-        # time the nut had already dropped ~7.5 mm past the ridge.
         early_state, early = advance(0.1, sample_every=1)
         state, samples = advance(0.65)
         return {
             **summary(state),
+            "rests_on_tip": travel - f.pitch_m <= state["gap_m"] <= travel + 0.0002,
             "expected_gap_mm": round(start_gap * 1000, 4),
             "placed_gap_mm": round(placed["gap_m"] * 1000, 4),
             "first_0.1s": early,
@@ -426,8 +443,8 @@ def main() -> None:
         }
 
     def torque_sweep():
-        """Re-engage and advance at each cap. 0afbd1a..ce61035 showed a narrow window:
-        2 mN m tracked the helix but stalled; 50 mN m spun the nut through the ridge."""
+        """Re-engage and advance at each cap, free and held upright. The old box-ridge thread
+        tracked only below ~5 mN m; a gripper turning a nut gives far more."""
         rows = {}
         trials = [(cap, upright) for upright in (False, True) for cap in [float(v) for v in args.torque_sweep.split(",") if v.strip()]]
         for cap, upright in trials:
@@ -455,7 +472,7 @@ def main() -> None:
         pool = tracking or list(rows.values())
         # Prefer the highest tracking cap: a robot turns with more than a fingertip's torque.
         # Without a tracking cap, take the one closest to the helix, not one that merely finished
-        # its turns: b01e670 picked 10 mN m (5 mm off the helix) and the seat stage scored 25.
+        # its turns (a cap that skipped turns would make the seat stage meaningless).
         best = (
             max(tracking, key=lambda r: r["cap_n_m"])
             if tracking
@@ -486,17 +503,10 @@ def main() -> None:
         # Deviation from the ideal helix along the whole run.
         ideal = [before["gap_m"] - f.pitch_m * (s["cw_turns"] - round(before["clockwise_turns"], 4)) for s in samples]
         deviation = max((abs(s["gap_mm"] / 1000 - g) for s, g in zip(samples, ideal)), default=None)
-        # Where the pins sit relative to the ridge seams, so a stall can be traced to geometry.
-        step_deg = 360.0 / f.segments_per_turn
-        pin_phase = [
-            round(((360.0 * state["clockwise_turns"] + 360.0 * k / f.pin_count) % step_deg) / step_deg, 3)
-            for k in range(f.pin_count)
-        ]
         return {
             **summary(state),
             "max_torque_n_m": args.max_torque,
             "reached_goal": state["clockwise_turns"] >= goal,
-            "pin_phase_in_segment": pin_phase,
             "drive_mode": drive["mode"],
             "turns": round(turns, 4),
             "descent_mm": round(descent * 1000, 4),
@@ -527,13 +537,12 @@ def main() -> None:
             weight = f.nut_mass_kg * 9.81
             state, _ = advance(0.5, force_z=4.0 * weight, released=True)
             after_state, _ = advance(0.5, released=True)
-            play = f.pitch_m - f.ridge_thickness_m - f.pin_thickness_m
             rise = state["gap_m"] - before["gap_m"]
             return {
                 "force_n": round(4.0 * weight, 4),
                 "rise_mm": round(rise * 1000, 4),
-                "groove_play_mm": round(play * 1000, 4),
-                "held_on_stud": rise < play + 0.0002,
+                # Axial thread play is well under half a pitch; jumping a thread rises a full pitch.
+                "held_on_bolt": rise < 0.5 * f.pitch_m,
                 "after": summary(after_state),
             }
 
@@ -541,7 +550,7 @@ def main() -> None:
 
         def seat():
             state, samples = advance(
-                4.0 * (f.turns + 1) / args.turn_rate,
+                4.0 * (turns_to_seat(cfg) + 1) / args.turn_rate,
                 torque_fn=spin(args.turn_rate),
                 released=False,
                 until=lambda s: s["gap_m"] <= cfg.scoring.seat_gap_m * 0.5,
@@ -563,7 +572,7 @@ def main() -> None:
             base_cap, base_upright = args.max_torque, args.hold_upright
             args.max_torque, args.hold_upright = base_cap * args.backoff_torque_scale, True
             state, samples = advance(
-                4.0 * (f.turns + 2) / args.turn_rate,
+                4.0 * (turns_to_seat(cfg) + 2) / args.turn_rate,
                 torque_fn=spin(-args.turn_rate),
                 released=False,
                 until=lambda s: s["gap_m"] >= free_gap,
@@ -577,7 +586,7 @@ def main() -> None:
                 "rise_mm": round((state["gap_m"] - before["gap_m"]) * 1000, 3),
                 "unthreaded": summary(state),
                 "lifted": summary(lifted),
-                "freed": lifted["gap_m"] > ridge_start_top_z_m(cfg) + 0.002,
+                "freed": lifted["gap_m"] > travel + 0.002,
             }
 
         _stage(report, "back_off", back_off)
@@ -585,15 +594,14 @@ def main() -> None:
     def collision_overlay():
         from pxr import Usd, UsdGeom, UsdPhysics
 
-        place(travel * 0.5, 360.0 * 0.5 * f.turns)
+        place(travel * 0.5, 0.0)
         shown, hidden = 0, 0
-        for root in ("/World/fixture", "/World/nut"):
+        colors = {"/World/fixture": (0.1, 0.6, 0.95), "/World/bolt": (1.0, 0.6, 0.0), "/World/nut": (0.95, 0.1, 0.1)}
+        for root, color in colors.items():
             for prim in Usd.PrimRange(stage.GetPrimAtPath(root), Usd.TraverseInstanceProxies()):
                 if not prim.IsA(UsdGeom.Gprim):
                     continue
                 if prim.HasAPI(UsdPhysics.CollisionAPI):
-                    name = prim.GetName()
-                    color = (0.95, 0.1, 0.1) if name.startswith("pin_") else (1.0, 0.6, 0.0) if name.startswith("ridge_") else (0.1, 0.6, 0.95)
                     UsdGeom.Gprim(prim).CreateDisplayColorAttr().Set([color])
                     shown += 1
                 else:

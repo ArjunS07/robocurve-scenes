@@ -16,21 +16,16 @@ from pathlib import Path
 
 import yaml
 
+from my_package.assets.factory import resolve_factory_asset
 from my_package.assets.geometry import (
+    bolt_envelope_world,
+    bolt_usda,
     ensure_generated_assets,
-    fixture_prims,
+    fixture_boxes,
+    fixture_boxes_world,
     fixture_usda,
     generated_dir,
-    lead_angle_rad,
-    mark_z_m,
-    nut_pin_boxes,
-    nut_prims,
     nut_usda,
-    pin_bottom_above_face_m,
-    pin_layout,
-    ridge_boxes,
-    ridge_end_rad,
-    ridge_top_z_m,
 )
 from my_package.assets.spawn import USD_FILE_FIELDS, resolve_robot_usd, usd_file_spawn_kwargs
 from my_package.embodiments.action_map import (
@@ -44,9 +39,19 @@ from my_package.embodiments.action_map import (
 )
 from my_package.embodiments.camera_frames import camera_offset_position
 from my_package.embodiments.grasp import any_arm_holding, finger_open_fraction, hold_known, is_holding
-from my_package.scoring.config import DEFAULT_CONFIG_PATH, jam_tilt_deg, load_config, parse_config, threaded_tilt_deg
+from my_package.scoring.config import (
+    DEFAULT_CONFIG_PATH,
+    bolt_position_xyz,
+    exposed_thread_m,
+    load_config,
+    nut_spawn_z,
+    parse_config,
+    start_mat_top_z,
+    threaded_tilt_bound_deg,
+    turns_to_seat,
+)
 from my_package.scoring.math3d import quat_from_axis_angle, quat_inv, rotate
-from my_package.scoring.scorer import carry_episode_memory, measure, required_travel_m, step
+from my_package.scoring.scorer import carry_episode_memory, measure, nut_centre_xyz, required_travel_m, step
 from my_package.scoring.snapshot import NutSnapshot, SceneSnapshot, clear_episode_state
 from my_package.scoring.summary import summarize_recorded_scores
 from my_package.tasks.capture import capture_steps, png_bytes
@@ -58,6 +63,7 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 def _gap_position(cfg, gap: float, radial: float = 0.0):
+    """The nut's centre (what the scorer reads) with its lower face ``gap`` above the seat."""
     fx, fy, fz = cfg.fixture_pose.position_xyz
     return (fx, fy + radial, fz + gap + cfg.fastener.nut_height_m / 2.0)
 
@@ -86,24 +92,52 @@ class ConfigTests(unittest.TestCase):
         cfg = load_config()
         self.assertEqual(cfg.episode_length_s, 120.0)
         self.assertEqual(cfg.task_description, "Tighten the nut onto the bolt.")
-        self.assertGreater(cfg.fastener.turns, 6.0)
-        self.assertLess(cfg.fastener.turns, 7.0)
-        self.assertAlmostEqual(required_travel_m(cfg), cfg.fastener.turns * cfg.fastener.pitch_m)
-        self.assertAlmostEqual(required_travel_m(cfg), 0.008125)
         f = cfg.fastener
-        self.assertLess(f.core_radius_m, f.pin_tip_radius_m)
-        self.assertLess(f.pin_tip_radius_m, f.major_radius_m)
-        self.assertLess(f.major_radius_m, f.hole_radius_m)
+        self.assertEqual(f.nominal, "M16")
+        self.assertEqual(f.handedness, "right")
+        self.assertAlmostEqual(f.pitch_m, 0.002)
+        for url in (f.nut_usd, f.bolt_usd):
+            self.assertTrue(url.startswith("https://omniverse-content-production.s3-us-west-2.amazonaws.com/"), url)
+            self.assertIn("/IsaacLab/Factory/factory_", url)
+        # About 16 mm of thread above the plate: 8 turns to seat.
+        self.assertAlmostEqual(exposed_thread_m(cfg), 0.016)
+        self.assertAlmostEqual(turns_to_seat(cfg), 8.0)
+        self.assertAlmostEqual(required_travel_m(cfg), exposed_thread_m(cfg))
         self.assertTrue(Path(cfg.robot.usd_path).is_absolute())
         self.assertEqual(cfg.robot.gripper_body_name, "gripper")
-        self.assertLess(threaded_tilt_deg(f), cfg.scoring.wedge_angle_deg)
-        self.assertLess(cfg.scoring.wedge_angle_deg, jam_tilt_deg(f))
-        self.assertAlmostEqual(cfg.nut_pose.position_xyz[2], cfg.table.top_z_m + cfg.fastener.nut_height_m / 2.0)
-        self.assertAlmostEqual(
-            cfg.fixture_pose.position_xyz[2],
-            cfg.table.top_z_m + cfg.fixture_body.plate_thickness_m + cfg.fixture_body.collar_height_m,
-        )
+        self.assertEqual(len(cfg.robot.finger_pad_offsets_m), 2)
+        self.assertLess(threaded_tilt_bound_deg(f), cfg.scoring.wedge_angle_deg)
+        self.assertGreaterEqual(cfg.scoring.radial_max_m, f.nut_bore_minor_radius_m - f.shank_minor_radius_m)
         self.assertEqual([camera.name for camera in cfg.cameras], ["overhead", "front", "side"])
+
+    def test_seat_height_and_nut_spawn(self):
+        cfg = load_config()
+        f = cfg.fastener
+        top = cfg.table.top_z_m
+        # The bolt stands on the table; the seat face is the plate top above its head.
+        self.assertEqual(bolt_position_xyz(cfg), (0.55, 0.0, top))
+        self.assertAlmostEqual(cfg.fixture_pose.position_xyz[2], top + f.bolt_head_height_m + cfg.fixture_body.plate_thickness_m)
+        self.assertAlmostEqual(cfg.fixture_pose.position_xyz[2], 0.022)
+        # Bolt tip = seat + exposed thread.
+        self.assertAlmostEqual(top + f.bolt_length_m, cfg.fixture_pose.position_xyz[2] + exposed_thread_m(cfg))
+        # The nut's origin is 10 mm below its lower face, which rests on the mat top.
+        self.assertAlmostEqual(start_mat_top_z(cfg), top + cfg.start_mat.thickness_m)
+        self.assertAlmostEqual(nut_spawn_z(cfg), start_mat_top_z(cfg) - 0.010)
+        self.assertAlmostEqual(cfg.nut_pose.position_xyz[2], -0.006)
+        centre = nut_centre_xyz(cfg, cfg.nut_pose.position_xyz, cfg.nut_pose.rotation_xyzw)
+        self.assertAlmostEqual(centre[2] - f.nut_height_m / 2.0, start_mat_top_z(cfg))
+        self.assertAlmostEqual(math.dist(cfg.nut_pose.position_xyz[:2], cfg.fixture_pose.position_xyz[:2]), 0.15)
+
+    def test_nut_centre_follows_the_nut_axis(self):
+        cfg = load_config()
+        up = cfg.fastener.nut_origin_to_lower_face_m + cfg.fastener.nut_height_m / 2.0
+        flipped = quat_from_axis_angle((1.0, 0.0, 0.0), math.pi)
+        centre = nut_centre_xyz(cfg, (0.5, 0.1, 0.2), flipped)
+        self.assertAlmostEqual(centre[2], 0.2 - up)
+        sideways = quat_from_axis_angle((0.0, 1.0, 0.0), math.pi / 2.0)
+        centre = nut_centre_xyz(cfg, (0.5, 0.1, 0.2), sideways)
+        self.assertAlmostEqual(centre[0], 0.5 + up)
+        self.assertAlmostEqual(centre[2], 0.2)
 
     def test_robot_bases_sit_on_the_table_footprint(self):
         cfg = load_config()
@@ -122,13 +156,21 @@ class ConfigTests(unittest.TestCase):
         for mutate, message in (
             (lambda d: d["robot"].__setitem__("left_base_xyz", [-0.05, 0.22, 0.003]), "tabletop"),
             (lambda d: d["robot"].__setitem__("usd_path", "assets/yam/yam.usda"), "absolute"),
-            (lambda d: d["fastener"].__setitem__("pin_tip_radius_m", 0.0039), "overlap"),
-            # 0.8 mm ridge + 0.5 mm pin exceed the 1.25 mm pitch: no axial groove left.
-            (lambda d: d["fastener"].__setitem__("ridge_thickness_m", 0.0008), "clearance"),
-            # A detection margin below the ridge thickness let pins tunnel on the server.
-            (lambda d: d["fastener"].__setitem__("thread_contact_offset_m", 0.00004), "tunnel"),
-            # 24 segments with 3 pins put every pin on a seam at once; it stalled on the server.
-            (lambda d: d["fastener"].__setitem__("segments_per_turn", 24), "seam"),
+            # A hole narrower than the thread crests would put the plate inside the bolt.
+            (lambda d: d["fixture_body"].__setitem__("hole_half_m", 0.0075), "plate hole"),
+            # A hole wider than the nut's flats leaves no seat face.
+            (lambda d: d["fixture_body"].__setitem__("hole_half_m", 0.013), "seat face"),
+            (lambda d: d["fixture_body"].__setitem__("pocket_half_m", 0.013), "pocket"),
+            # A thin plate exposes more than 10 turns (and moves the seat).
+            (lambda d: d["fixture_body"].__setitem__("plate_thickness_m", 0.003), "turns"),
+            (lambda d: d["nut_pose"].__setitem__("position_xyz", [0.55, 0.15, 0.0095]), "nut z"),
+            (lambda d: d["fixture_pose"].__setitem__("position_xyz", [0.55, 0.0, 0.019]), "fixture z"),
+            (lambda d: d["fastener"].__setitem__("handedness", "left"), "handedness"),
+            (lambda d: d["fastener"].__setitem__("nut_usd", "factory_nut_m16.usd"), "nut_usd"),
+            (lambda d: d["start_mat"].__setitem__("half_xy_m", [0.005, 0.005]), "start mat"),
+            (lambda d: d["start_mat"].__setitem__("half_xy_m", [0.02, 0.13]), "overlap the fixture"),
+            (lambda d: d["scoring"].__setitem__("wedge_angle_deg", 3.0), "wedge"),
+            (lambda d: d["scoring"].__setitem__("radial_max_m", 0.0003), "radial play"),
         ):
             data = yaml.safe_load(yaml.safe_dump(base))
             mutate(data)
@@ -153,14 +195,14 @@ class ScoringTests(unittest.TestCase):
         return report
 
     def test_seated_and_released_scores_100(self):
-        report = self._score(_scene(self.cfg, _gap_position(self.cfg, 0.0), turns=self.cfg.fastener.turns))
+        report = self._score(_scene(self.cfg, _gap_position(self.cfg, 0.0), turns=turns_to_seat(self.cfg)))
         self.assertEqual(report.score, 100)
         self.assertTrue(report.thread.threaded)
         self.assertFalse(report.hard_failure)
 
     def test_held_at_full_seat_scores_75(self):
         report = self._score(
-            _scene(self.cfg, _gap_position(self.cfg, 0.0), turns=self.cfg.fastener.turns, holding=True, released=False)
+            _scene(self.cfg, _gap_position(self.cfg, 0.0), turns=turns_to_seat(self.cfg), holding=True, released=False)
         )
         self.assertEqual(report.score, 75)
         self.assertFalse(report.hard_failure)
@@ -200,23 +242,24 @@ class ScoringTests(unittest.TestCase):
         self.assertTrue(report.thread.threaded)
 
     def test_tip_rest_is_not_threaded(self):
-        gap = self.travel + self.cfg.fastener.lead_in_m
+        # Resting on the tip thread, above the first full turn.
+        gap = self.travel + 0.0005
         report = self._score(_scene(self.cfg, _gap_position(self.cfg, gap), turns=20.0))
         self.assertFalse(report.thread.threaded)
         self.assertEqual(report.score, 25)
 
     def test_wedge_is_not_threaded(self):
         quat = quat_from_axis_angle((1.0, 0.0, 0.0), math.radians(30.0))
-        report = self._score(_scene(self.cfg, (0.48, 0.0, 0.84), quat=quat, turns=self.cfg.fastener.turns))
+        report = self._score(_scene(self.cfg, (0.48, 0.0, 0.84), quat=quat, turns=turns_to_seat(self.cfg)))
         self.assertGreater(report.thread.tilt_deg, self.cfg.scoring.wedge_angle_deg)
         self.assertFalse(report.thread.threaded)
         self.assertEqual(report.score, 25)
 
     def test_off_table_and_fixture_motion_override(self):
-        seated = _scene(self.cfg, _gap_position(self.cfg, 0.0), turns=self.cfg.fastener.turns)
+        seated = _scene(self.cfg, _gap_position(self.cfg, 0.0), turns=turns_to_seat(self.cfg))
         off = SceneSnapshot(nut=seated.nut, fixture_position_xyz=seated.fixture_position_xyz, fixture_rotation_xyzw=seated.fixture_rotation_xyzw)
         off = SceneSnapshot(
-            nut=NutSnapshot((2.0, 0.0, 0.9), (0.0, 0.0, 0.0, 1.0), False, True, False, thread_turns=self.cfg.fastener.turns),
+            nut=NutSnapshot((2.0, 0.0, 0.9), (0.0, 0.0, 0.0, 1.0), False, True, False, thread_turns=turns_to_seat(self.cfg)),
             fixture_position_xyz=self.cfg.fixture_pose.position_xyz,
             fixture_rotation_xyzw=self.cfg.fixture_pose.rotation_xyzw,
         )
@@ -227,14 +270,14 @@ class ScoringTests(unittest.TestCase):
         moved = _scene(
             self.cfg,
             _gap_position(self.cfg, 0.0),
-            turns=self.cfg.fastener.turns,
+            turns=turns_to_seat(self.cfg),
             fixture_pos=(0.50, 0.0, self.cfg.fixture_pose.position_xyz[2]),
         )
         moved_report = self._score(moved)
         self.assertEqual(moved_report.score, 0)
         self.assertIn("fixture_moved", moved_report.hard_reasons)
         yaw = quat_from_axis_angle((0.0, 0.0, 1.0), math.radians(6.0))
-        yaw_report = self._score(_scene(self.cfg, _gap_position(self.cfg, 0.0), turns=self.cfg.fastener.turns, fixture_quat=yaw))
+        yaw_report = self._score(_scene(self.cfg, _gap_position(self.cfg, 0.0), turns=turns_to_seat(self.cfg), fixture_quat=yaw))
         self.assertIn("fixture_moved", yaw_report.hard_reasons)
 
     def test_clockwise_turn_accumulates_and_leaving_clears_it(self):
@@ -296,7 +339,7 @@ class ScoringTests(unittest.TestCase):
         return [(gap, start + index * per_step, holding) for index in range(1, count + 1)]
 
     def test_screwing_down_with_coupled_descent_scores_100(self):
-        turns = self.cfg.fastener.turns
+        turns = turns_to_seat(self.cfg)
         frames = [(0.05, 0.0, True), (self.travel, 0.0, True)]
         steps = int(round(turns / 0.1))
         frames += [(self.travel - (i * 0.1) * self.pitch, i * 0.1, True) for i in range(1, steps + 1)]
@@ -306,7 +349,7 @@ class ScoringTests(unittest.TestCase):
         self.assertNotIn("cross_threaded", report.hard_reasons)
 
     def test_drop_to_seat_then_spin_is_cross_threaded(self):
-        turns = self.cfg.fastener.turns
+        turns = turns_to_seat(self.cfg)
         frames = [(0.05, 0.0, True), (self.travel, 0.0, True), (0.0, 0.0, True)]
         frames += self._spin(0.0, 0.0, turns)
         frames += [(0.0, turns, False)]
@@ -316,14 +359,14 @@ class ScoringTests(unittest.TestCase):
         self.assertIn("cross_threaded", report.hard_reasons)
 
     def test_spin_at_top_then_drop_is_not_threaded(self):
-        turns = self.cfg.fastener.turns
+        turns = turns_to_seat(self.cfg)
         frames = [(0.05, 0.0, True)] + self._spin(self.travel, 0.0, turns) + [(0.0, turns, True), (0.0, turns, False)]
         report = self._run(frames)
         self.assertEqual(report.score, 25)
         self.assertFalse(report.thread.threaded)
 
     def test_spin_just_below_first_thread_then_drop_is_cross_threaded(self):
-        turns = self.cfg.fastener.turns
+        turns = turns_to_seat(self.cfg)
         gap = self.travel - 0.1 * self.pitch
         frames = [(0.05, 0.0, True), (self.travel, 0.0, True)] + self._spin(gap, 0.0, turns)
         frames += [(0.0, turns, True), (0.0, turns, False)]
@@ -332,7 +375,7 @@ class ScoringTests(unittest.TestCase):
         self.assertTrue(report.thread.cross_threaded)
 
     def test_backing_off_clears_cross_thread(self):
-        turns = self.cfg.fastener.turns
+        turns = turns_to_seat(self.cfg)
         frames = [(0.05, 0.0, True), (self.travel, 0.0, True), (0.0, 0.0, True), (0.05, 0.0, True), (self.travel, 0.0, True)]
         steps = int(round(turns / 0.1))
         frames += [(self.travel - (i * 0.1) * self.pitch, i * 0.1, True) for i in range(1, steps + 1)]
@@ -342,22 +385,25 @@ class ScoringTests(unittest.TestCase):
 
     def test_upside_down_nut_counts(self):
         flipped = quat_from_axis_angle((1.0, 0.0, 0.0), math.pi)
-        report = self._score(_scene(self.cfg, _gap_position(self.cfg, 0.0), quat=flipped, turns=self.cfg.fastener.turns))
+        report = self._score(_scene(self.cfg, _gap_position(self.cfg, 0.0), quat=flipped, turns=turns_to_seat(self.cfg)))
         self.assertAlmostEqual(report.thread.tilt_deg, 0.0, places=5)
         self.assertAlmostEqual(report.thread.gap_m, 0.0, places=9)
         self.assertEqual(report.score, 100)
 
-    def test_jammed_nut_is_not_aligned(self):
-        jam = jam_tilt_deg(self.cfg.fastener)
-        self.assertLess(self.cfg.scoring.wedge_angle_deg, jam)
-        quat = quat_from_axis_angle((1.0, 0.0, 0.0), math.radians(jam - 0.5))
+    def test_tilt_past_the_wedge_angle_is_not_aligned(self):
+        tilt = self.cfg.scoring.wedge_angle_deg + 0.5
+        quat = quat_from_axis_angle((1.0, 0.0, 0.0), math.radians(tilt))
         report = self._score(_scene(self.cfg, _gap_position(self.cfg, 0.002), quat=quat, turns=(self.travel - 0.002) / self.pitch))
         self.assertFalse(report.thread.aligned)
         self.assertEqual(report.score, 25)
+        # Within the thread's tilt bound it still counts.
+        quat = quat_from_axis_angle((1.0, 0.0, 0.0), math.radians(threaded_tilt_bound_deg(self.cfg.fastener)))
+        report = self._score(_scene(self.cfg, _gap_position(self.cfg, 0.002), quat=quat, turns=(self.travel - 0.002) / self.pitch))
+        self.assertTrue(report.thread.aligned)
 
     def test_fixture_tilt_counts_as_moved(self):
         tilt = quat_from_axis_angle((1.0, 0.0, 0.0), math.radians(6.0))
-        report = self._score(_scene(self.cfg, _gap_position(self.cfg, 0.0), turns=self.cfg.fastener.turns, fixture_quat=tilt))
+        report = self._score(_scene(self.cfg, _gap_position(self.cfg, 0.0), turns=turns_to_seat(self.cfg), fixture_quat=tilt))
         self.assertIn("fixture_moved", report.hard_reasons)
         self.assertEqual(report.score, 0)
 
@@ -447,72 +493,155 @@ class ActionAndGraspTests(unittest.TestCase):
         self.assertAlmostEqual(offset[2], 0.70)
 
 
-def _usda_prims(text: str) -> dict[str, dict]:
-    """Minimal USDA reader for the generated files: prim name -> attributes and schemas."""
-    prims = {}
-    for match in re.finditer(r'def (\w+) "(\w+)"(.*?)\n    \}', text, re.S):
-        kind, name, body = match.groups()
-        prims[name] = {"kind": kind, "body": body}
-    return prims
+def _overlap(lo_a, hi_a, lo_b, hi_b, tol: float = 1e-9) -> bool:
+    """Open-interval overlap in every axis; touching faces do not count."""
+    return all(a0 < b1 - tol and b0 < a1 - tol for a0, a1, b0, b1 in zip(lo_a, hi_a, lo_b, hi_b, strict=True))
 
 
-def _attr(body: str, name: str):
-    match = re.search(re.escape(name) + r" = \(([^)]*)\)", body)
-    return tuple(float(v) for v in match.group(1).split(",")) if match else None
+def _box_cylinder_clearance(box, axis_xy, radius, z_low, z_high) -> float | None:
+    """Horizontal clearance between a box and a vertical cylinder; None if their z ranges do not overlap."""
+    if box.upper[2] <= z_low + 1e-9 or box.lower[2] >= z_high - 1e-9:
+        return None
+    dx = max(box.lower[0] - axis_xy[0], 0.0, axis_xy[0] - box.upper[0])
+    dy = max(box.lower[1] - axis_xy[1], 0.0, axis_xy[1] - box.upper[1])
+    return math.hypot(dx, dy) - radius
 
 
-def _usd_quat_to_xyzw(wxyz):
-    w, x, y, z = wxyz
-    return (x, y, z, w)
+FAKE_NUT = "/cache/factory_nut_m16.usd"
+FAKE_BOLT = "/cache/factory_bolt_m16.usd"
 
 
 class GeometryTests(unittest.TestCase):
+    def test_plate_hole_clears_the_bolt(self):
+        cfg = load_config()
+        bolt_xy = bolt_position_xyz(cfg)[:2]
+        checked = 0
+        for box in fixture_boxes_world(cfg):
+            for name, radius, z_low, z_high in bolt_envelope_world(cfg):
+                clearance = _box_cylinder_clearance(box, bolt_xy, radius, z_low, z_high)
+                if clearance is None:
+                    continue
+                checked += 1
+                # No fixture collider touches the bolt: at least 1 mm all round.
+                self.assertGreater(clearance, 0.001, (box.name, name, clearance))
+        self.assertGreaterEqual(checked, 8)
+        plate = [box for box in fixture_boxes(cfg) if box.name.startswith("plate_")]
+        pocket = [box for box in fixture_boxes(cfg) if box.name.startswith("pocket_")]
+        self.assertEqual((len(plate), len(pocket)), (4, 4))
+        # The plate top is the seat face (fixture origin) and its hole is narrower than the nut's flats.
+        self.assertTrue(all(box.upper[2] == 0.0 for box in plate))
+        self.assertLess(cfg.fixture_body.hole_half_m, cfg.fastener.nut_across_flats_m / 2.0)
+        self.assertGreater(cfg.fixture_body.hole_half_m, cfg.fastener.shank_major_radius_m)
+
+    def test_exposed_length_and_seat(self):
+        cfg = load_config()
+        fz = cfg.fixture_pose.position_xyz[2]
+        shank = next(item for item in bolt_envelope_world(cfg) if item[0] == "shank")
+        plate_top = max(box.upper[2] for box in fixture_boxes_world(cfg) if box.name.startswith("plate_"))
+        self.assertAlmostEqual(plate_top, fz)
+        self.assertAlmostEqual(shank[3] - plate_top, exposed_thread_m(cfg))
+        self.assertAlmostEqual(exposed_thread_m(cfg) / cfg.fastener.pitch_m, 8.0)
+        # The block sits on the table; the head is in the pocket layer, flush with its top.
+        self.assertAlmostEqual(min(box.lower[2] for box in fixture_boxes_world(cfg) if box.name.startswith("pocket_")), cfg.table.top_z_m)
+        head = next(item for item in bolt_envelope_world(cfg) if item[0] == "head")
+        self.assertAlmostEqual(head[3], fz - cfg.fixture_body.plate_thickness_m)
+
+    def test_start_mat_holds_the_nut_flat(self):
+        cfg = load_config()
+        mat = next(box for box in fixture_boxes_world(cfg) if box.name == "start_mat")
+        self.assertAlmostEqual(mat.lower[2], cfg.table.top_z_m)
+        self.assertAlmostEqual(mat.upper[2], start_mat_top_z(cfg))
+        nx, ny, _ = cfg.nut_pose.position_xyz
+        corner = cfg.fastener.nut_across_flats_m / math.sqrt(3.0)
+        self.assertLessEqual(mat.lower[0], nx - corner)
+        self.assertGreaterEqual(mat.upper[0], nx + corner)
+        self.assertLessEqual(mat.lower[1], ny - corner)
+        self.assertGreaterEqual(mat.upper[1], ny + corner)
+
+    def test_no_collider_overlaps(self):
+        cfg = load_config()
+        boxes = fixture_boxes_world(cfg)
+        for i, a in enumerate(boxes):
+            for b in boxes[i + 1 :]:
+                self.assertFalse(_overlap(a.lower, a.upper, b.lower, b.upper), (a.name, b.name))
+        # The nut at its spawn pose (hex bounded by its corner circle) touches only the mat top.
+        f = cfg.fastener
+        centre = nut_centre_xyz(cfg, cfg.nut_pose.position_xyz, cfg.nut_pose.rotation_xyzw)
+        corner = f.nut_across_flats_m / math.sqrt(3.0)
+        nut_lo = (centre[0] - corner, centre[1] - corner, centre[2] - f.nut_height_m / 2.0)
+        nut_hi = (centre[0] + corner, centre[1] + corner, centre[2] + f.nut_height_m / 2.0)
+        for box in boxes:
+            self.assertFalse(_overlap(nut_lo, nut_hi, box.lower, box.upper), box.name)
+        self.assertAlmostEqual(nut_lo[2], start_mat_top_z(cfg))
+        # And it is clear of the bolt.
+        self.assertGreater(math.dist(centre[:2], bolt_position_xyz(cfg)[:2]), corner + f.bolt_head_corner_radius_m)
+
     def test_assets(self):
         cfg = load_config()
-        walls = [prim for prim in nut_prims(cfg) if prim.name.startswith("wall_")]
-        self.assertEqual(len(walls), 6)
-        self.assertTrue(all(prim.collision for prim in walls))
-        fixture = fixture_prims(cfg)
-        stud = next(prim for prim in fixture if prim.name == "stud")
-        self.assertTrue(stud.collision)
-        self.assertAlmostEqual(stud.radius_m, cfg.fastener.core_radius_m)
-        self.assertAlmostEqual(stud.height_m, required_travel_m(cfg) + cfg.fastener.lead_in_m)
-        ridge = [prim for prim in fixture if prim.name.startswith("ridge_")]
-        self.assertGreater(len(ridge), 6 * cfg.fastener.segments_per_turn)
-        self.assertTrue(all(prim.collision for prim in ridge))
-        self.assertFalse(any(prim.kind == "sphere" for prim in fixture))
-        travel = required_travel_m(cfg)
-        for name, completed in (("mark_100", 1.0), ("mark_75", 0.75), ("mark_50", 0.5)):
-            mark = next(prim for prim in fixture if prim.name == name)
-            self.assertFalse(mark.collision)
-            self.assertAlmostEqual(mark.translate[2], mark_z_m(travel, completed))
-        nut_text = nut_usda(cfg)
         fixture_text = fixture_usda(cfg)
-        for text in (nut_text, fixture_text):
-            self.assertEqual(text.count("PhysicsRigidBodyAPI"), 1)
-            self.assertNotIn("PhysicsFixedJoint", text)
-            self.assertNotIn("PhysicsArticulationRootAPI", text)
-            self.assertIn("PhysicsMaterialAPI", text)
-            self.assertIn("material:binding:physics", text)
-            self.assertIn(f"staticFriction = {cfg.fastener.static_friction:.8f}", text)
-            self.assertIn("solverPositionIterationCount = 32", text)
-            self.assertIn("maxDepenetrationVelocity = 0.05", text)
-            self.assertIn("solverVelocityIterationCount = 1", text)
-            # Every collider applies PhysxCollisionAPI, so its contactOffset is honoured.
-            self.assertEqual(text.count('"PhysicsCollisionAPI", "PhysxCollisionAPI"'), text.count("PhysicsCollisionAPI"))
         self.assertIn("physics:kinematicEnabled = true", fixture_text)
+        self.assertEqual(fixture_text.count("PhysicsRigidBodyAPI"), 1)
+        self.assertEqual(fixture_text.count('def Cube "'), len(fixture_boxes(cfg)))
+        self.assertEqual(fixture_text.count("material:binding:physics"), len(fixture_boxes(cfg)))
+        self.assertIn(f"staticFriction = {cfg.fixture_body.static_friction:.8f}", fixture_text)
+        for text in (fixture_text,):
+            self.assertNotIn("PhysicsFixedJoint", text)
+            self.assertNotIn("ArticulationRootAPI", text)
+        nut_text = nut_usda(cfg, FAKE_NUT)
+        bolt_text = bolt_usda(cfg, FAKE_BOLT)
+        self.assertIn(f"prepend references = @{FAKE_NUT}@", nut_text)
+        self.assertIn(f"prepend references = @{FAKE_BOLT}@", bolt_text)
+        self.assertIn('over "factory_nut_loose"', nut_text)
+        self.assertIn('over "factory_bolt_loose"', bolt_text)
         self.assertIn("physics:kinematicEnabled = false", nut_text)
-        self.assertIn(f"contactOffset = {cfg.fastener.thread_contact_offset_m:.8f}", fixture_text)
-        backplate = next(prim for prim in fixture if prim.name == "backplate")
-        face_x = backplate.translate[0] + backplate.scale[0]
-        for name in ("mark_100", "mark_75", "mark_50"):
-            mark = next(prim for prim in fixture if prim.name == name)
-            self.assertLess(mark.translate[0] - mark.scale[0], face_x)
-            self.assertGreater(mark.translate[0] + mark.scale[0], face_x)
+        self.assertIn("physics:kinematicEnabled = true", bolt_text)
+        # The bolt's world fixed joint would make it an articulation: it is switched off.
+        self.assertRegex(bolt_text, r'over "root_joint" \(\s*active = false')
+        self.assertNotIn("root_joint", nut_text)
+        p = cfg.physics
+        for text in (nut_text, bolt_text):
+            # A RigidObject must not contain an articulation root.
+            self.assertIn('delete apiSchemas = ["PhysicsArticulationRootAPI", "PhysxArticulationAPI"]', text)
+            self.assertIn(f"solverPositionIterationCount = {p.fastener_solver_position_iterations}", text)
+            self.assertIn(f"solverVelocityIterationCount = {p.fastener_solver_velocity_iterations}", text)
+            self.assertIn(f"maxDepenetrationVelocity = {p.fastener_max_depenetration_velocity_m_s:.8f}", text)
+            self.assertIn("enableGyroscopicForces = true", text)
+            self.assertIn("maxContactImpulse = 1e+32", text)
+            self.assertIn(f"contactOffset = {p.fastener_contact_offset_m:.8f}", text)
+            self.assertIn(f"restOffset = {p.fastener_rest_offset_m:.8f}", text)
+            self.assertIn('over "collisions"', text)
+            self.assertIn(f"staticFriction = {p.fastener_friction:.8f}", text)
+            # Wrappers only reference NVIDIA's files; nothing is vendored.
+            self.assertNotIn("def Mesh", text)
         with tempfile.TemporaryDirectory() as directory:
-            nut_path, fixture_path = ensure_generated_assets(cfg, directory)
+            nut_path, bolt_path, fixture_path = ensure_generated_assets(cfg, FAKE_NUT, FAKE_BOLT, directory)
             self.assertEqual(nut_path.read_text(encoding="utf-8"), nut_text)
+            self.assertEqual(bolt_path.read_text(encoding="utf-8"), bolt_text)
             self.assertEqual(fixture_path.read_text(encoding="utf-8"), fixture_text)
+        self.assertFalse(list(ROOT.rglob("factory_*_m16.usd")))
+
+    def test_missing_factory_asset_fails_clearly(self):
+        with self.assertRaisesRegex(FileNotFoundError, "nut_usd.*not found.*Factory M16"):
+            resolve_factory_asset("/nonexistent/factory_nut_m16.usd", "nut_usd")
+        with tempfile.NamedTemporaryFile(suffix=".usd") as handle:
+            self.assertEqual(resolve_factory_asset(handle.name, "nut_usd"), handle.name)
+        import sys
+        import types
+
+        cfg = load_config()
+        calls = []
+
+        def fetch(path, force_download=True):
+            calls.append((path, force_download))
+            raise FileNotFoundError("404")
+
+        module = types.ModuleType("isaaclab.utils.assets")
+        module.retrieve_file_path = fetch
+        with unittest.mock.patch.dict(sys.modules, {"isaaclab": types.ModuleType("isaaclab"), "isaaclab.utils": types.ModuleType("isaaclab.utils"), "isaaclab.utils.assets": module}):
+            with self.assertRaisesRegex(FileNotFoundError, "bolt_usd could not be fetched from https://.*404"):
+                resolve_factory_asset(cfg.fastener.bolt_usd, "bolt_usd")
+        # Isaac Lab's cache is reused rather than downloading every launch.
+        self.assertEqual(calls, [(cfg.fastener.bolt_usd, False)])
 
     def test_generated_dir_is_outside_the_package_source(self):
         with unittest.mock.patch.dict(os.environ, {"ROBOCURVE_GENERATED_DIR": "/tmp/robocurve-gen"}):
@@ -521,54 +650,6 @@ class GeometryTests(unittest.TestCase):
             os.environ.pop("ROBOCURVE_GENERATED_DIR", None)
             self.assertEqual(generated_dir(), ROOT / "outputs" / "generated")
         self.assertFalse((ROOT / "my_package" / "assets" / "generated").exists())
-
-    def test_usda_ridge_matches_the_helix(self):
-        """Parse the written fixture: every ridge box top must sit on the helix at the contact radius."""
-        cfg = load_config()
-        prims = _usda_prims(fixture_usda(cfg))
-        ridge = {name: prim for name, prim in prims.items() if name.startswith("ridge_")}
-        self.assertEqual(len(ridge), len(ridge_boxes(cfg)))
-        step = 2.0 * math.pi / cfg.fastener.segments_per_turn
-        for name, prim in ridge.items():
-            index = int(name.split("_")[1])
-            center = _attr(prim["body"], "float3 xformOp:translate")
-            orient = _usd_quat_to_xyzw(_attr(prim["body"], "quatf xformOp:orient"))
-            half = _attr(prim["body"], "float3 xformOp:scale")
-            up = rotate(orient, (0.0, 0.0, 1.0))
-            top_center = tuple(c + half[2] * u for c, u in zip(center, up))
-            clockwise = (index + 0.5) * step
-            self.assertAlmostEqual(top_center[2], ridge_top_z_m(cfg, clockwise), delta=2e-6)
-            # Its tangential slope matches the lead angle: one pitch per turn.
-            tangent = rotate(orient, (0.0, 1.0, 0.0))
-            self.assertAlmostEqual(math.atan2(tangent[2], math.hypot(tangent[0], tangent[1])), lead_angle_rad(cfg), places=6)
-        self.assertGreaterEqual(ridge_top_z_m(cfg, ridge_end_rad(cfg)), -1e-9)
-
-    def test_pins_ride_the_ridge_at_every_turn(self):
-        """For a nut at clockwise yaw psi with lower face at travel - pitch*psi/2pi, each pin bottom is on the ridge top."""
-        cfg = load_config()
-        f = cfg.fastener
-        travel = required_travel_m(cfg)
-        layout = pin_layout(cfg)
-        self.assertEqual(len(layout), f.pin_count)
-        for psi_turns in (0.1, 1.0, 2.37, 4.5, f.turns):
-            psi = 2.0 * math.pi * psi_turns
-            gap = travel - f.pitch_m * psi_turns
-            for k, (angle, _z) in enumerate(layout):
-                pin_clockwise = psi - angle
-                pin_bottom = gap + pin_bottom_above_face_m(cfg, k)
-                self.assertAlmostEqual(pin_bottom, ridge_top_z_m(cfg, pin_clockwise), delta=1e-9)
-                self.assertLessEqual(pin_clockwise, ridge_end_rad(cfg))
-                # The next turn up is above the pin's top by the groove play: no straight pull-off.
-                above_bottom = ridge_top_z_m(cfg, pin_clockwise - 2.0 * math.pi) - f.ridge_thickness_m
-                self.assertAlmostEqual(above_bottom - (pin_bottom + f.pin_thickness_m), f.pitch_m - f.ridge_thickness_m - f.pin_thickness_m, delta=1e-9)
-        # Self-locking: the lead angle is far below the friction angle, so a released nut holds.
-        self.assertLess(math.tan(lead_angle_rad(cfg)), 0.2 * f.static_friction)
-        # Pins sit radially between the core and the ridge crest, and reach into the bore wall.
-        for pin in nut_pin_boxes(cfg):
-            radial = math.hypot(pin.translate[0], pin.translate[1])
-            self.assertAlmostEqual(radial - pin.scale[0], f.pin_tip_radius_m, places=9)
-            self.assertGreater(radial + pin.scale[0], f.hole_radius_m)
-            self.assertGreater(pin.translate[2] - pin.scale[2], -f.nut_height_m / 2.0)
 
 
 class RuntimeAndLaunchTests(unittest.TestCase):
@@ -649,14 +730,14 @@ class RuntimeAndLaunchTests(unittest.TestCase):
         self.assertTrue(hold_known([{"distance_m": 0.1, "open_fraction": 1.0}] * 2))
         nut = NutSnapshot(
             position_xyz=_gap_position(cfg, 0.0),
-            rotation_xyzw=quat_from_axis_angle((0.0, 0.0, 1.0), -2.0 * math.pi * cfg.fastener.turns),
+            rotation_xyzw=quat_from_axis_angle((0.0, 0.0, 1.0), -2.0 * math.pi * turns_to_seat(cfg)),
             gripper_holding=False,
             released=False,
             off_table=False,
             hold_known=False,
             ever_lifted=True,
-            thread_turns=cfg.fastener.turns,
-            prev_yaw_rad=-2.0 * math.pi * cfg.fastener.turns,
+            thread_turns=turns_to_seat(cfg),
+            prev_yaw_rad=-2.0 * math.pi * turns_to_seat(cfg),
         )
         scene = SceneSnapshot(nut=nut, fixture_position_xyz=cfg.fixture_pose.position_xyz, fixture_rotation_xyzw=cfg.fixture_pose.rotation_xyzw)
         _snap, report = step(cfg, scene, 0.02)
@@ -667,7 +748,7 @@ class RuntimeAndLaunchTests(unittest.TestCase):
 
         known = dataclasses.replace(scene, nut=dataclasses.replace(nut, hold_known=True, released=True))
         self.assertEqual(step(cfg, known, 0.02)[1].score, 100)
-        self.assertLess(travel, 0.01)
+        self.assertAlmostEqual(travel, 0.016)
 
     def test_capture_png_and_steps(self):
         self.assertEqual(capture_steps(None), {1, 25, 49})
@@ -748,7 +829,11 @@ class RuntimeAndLaunchTests(unittest.TestCase):
         self.assertFalse((env_dir / "__init__.py").exists())
         embodiment = (ROOT / "my_package" / "embodiments" / "yam_bimanual.py").read_text(encoding="utf-8")
         self.assertLess(embodiment.index("if self.enable_cameras:"), embodiment.index("self.camera_config = _camera_cfg"))
-        for relative in ("my_package/scoring", "my_package/assets/geometry.py", "my_package/embodiments/action_map.py"):
+        for relative in (
+            "my_package/scoring",
+            "my_package/assets/geometry.py",
+            "my_package/embodiments/action_map.py",
+        ):
             path = ROOT / relative
             files = [path] if path.is_file() else list(path.glob("*.py"))
             for source in files:
@@ -757,6 +842,11 @@ class RuntimeAndLaunchTests(unittest.TestCase):
                     if isinstance(node, ast.ImportFrom) and node.module:
                         self.assertFalse(node.module.startswith("isaac"))
                         self.assertFalse(node.module.startswith("omni"))
+        # The Factory resolver imports Isaac Lab only inside the function that fetches.
+        factory = ast.parse((ROOT / "my_package" / "assets" / "factory.py").read_text(encoding="utf-8"))
+        for node in factory.body:
+            if isinstance(node, ast.ImportFrom) and node.module:
+                self.assertFalse(node.module.startswith(("isaac", "omni")))
 
 
 if __name__ == "__main__":
@@ -764,21 +854,14 @@ if __name__ == "__main__":
 
 
 class TaskTermParamsTests(unittest.TestCase):
-    def test_nut_has_speculative_ccd_and_a_spin_cap(self):
-        import tempfile, os
-
-        cfg = load_config()
-        with tempfile.TemporaryDirectory() as directory, unittest.mock.patch.dict(os.environ, {"ROBOCURVE_GENERATED_DIR": directory}):
-            from my_package.assets.geometry import ensure_generated_assets
-
-            nut_usd, fixture_usd = ensure_generated_assets(cfg)
-            nut, fixture = Path(nut_usd).read_text(), Path(fixture_usd).read_text()
-        self.assertIn(f"physxRigidBody:enableSpeculativeCCD = {'true' if cfg.physics.nut_speculative_ccd else 'false'}", nut)
-        self.assertIn("physxRigidBody:maxAngularVelocity = 1440", nut)
-        self.assertEqual(nut.count('def Cube "pin_'), cfg.fastener.pin_count)
-        # The kinematic fixture does not need either.
-        self.assertNotIn("enableSpeculativeCCD", fixture)
-        self.assertEqual(math.gcd(cfg.fastener.segments_per_turn, cfg.fastener.pin_count), 1)
+    def test_environment_spawns_the_bolt_from_the_factory_wrappers(self):
+        text = (ROOT / "my_package" / "isaaclab_arena_environments" / "nut_environment.py").read_text()
+        self.assertIn("resolve_fastener_assets(cfg)", text)
+        self.assertIn('make_rigid_usd_object("bolt", bolt_usd, bolt_position_xyz(cfg)', text)
+        self.assertIn("nut, bolt, fixture", text)
+        bridge = (ROOT / "my_package" / "tasks" / "sim_bridge.py").read_text()
+        # Scored and held from the nut's centre, not the Factory body origin below its face.
+        self.assertIn("nut_centre_xyz(cfg, env_local_position(nut_world, origin), nut_rotation)", bridge)
 
     def test_frozen_config_is_not_passed_through_term_params(self):
         # Isaac Lab's configclass post-init assigns into params and raised

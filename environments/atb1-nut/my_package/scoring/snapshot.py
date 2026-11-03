@@ -7,6 +7,7 @@ from dataclasses import dataclass, replace
 
 @dataclass(frozen=True)
 class NutSnapshot:
+    # The nut's geometric centre (scorer.nut_centre_xyz), not the Factory body origin.
     position_xyz: tuple[float, float, float]
     rotation_xyzw: tuple[float, float, float, float]
     gripper_holding: bool

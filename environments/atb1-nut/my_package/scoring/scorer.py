@@ -1,15 +1,18 @@
 """Score one control step of the nut-threading task. No Isaac Sim imports.
 
-The stud carries a physical helical ridge and the nut three pins, so PhysX
-contacts couple rotation and descent (see assets/geometry.py). The scorer does
-not enforce that coupling; it only checks, on every step, that the observed
-pose is consistent with it while the nut is coaxial. If descent and turns ever disagree by more than the tolerance while
-the nut is engaged, the nut is cross-threaded until it is backed off above the
-first thread or taken off the stud. A nut sitting on the tip, or tilted onto
-the stud, is not threaded. Visible damage is not modeled.
+The Factory M16 bolt and nut carry real 2.0 mm right-hand threads with SDF
+collision, so PhysX contacts couple rotation and descent. The scorer does not
+enforce that coupling; it only checks, on every step, that the observed pose is
+consistent with it while the nut is coaxial. If descent and turns ever disagree
+by more than the tolerance while the nut is engaged, the nut is cross-threaded
+until it is backed off above the first thread or taken off the bolt. A nut
+sitting on the tip, or tilted onto the bolt, is not threaded. Visible damage is
+not modeled.
 
-A hex nut is symmetric, so an upside-down nut is treated the same as an upright
-one.
+Distances are measured from the nut's geometric centre (see nut_centre_xyz: the
+Factory nut's body origin sits below its lower face) and from the fixture
+origin, which is the seat face. A hex nut is symmetric, so an upside-down nut
+is treated the same as an upright one.
 """
 
 from __future__ import annotations
@@ -17,7 +20,7 @@ from __future__ import annotations
 import math
 from dataclasses import dataclass, replace
 
-from my_package.scoring.config import NutThreadingConfig
+from my_package.scoring.config import NutThreadingConfig, exposed_thread_m
 from my_package.scoring.math3d import (
     angle_deg,
     dot,
@@ -60,7 +63,16 @@ class ScoreReport:
 
 
 def required_travel_m(cfg: NutThreadingConfig) -> float:
-    return cfg.fastener.turns * cfg.fastener.pitch_m
+    """From the bolt tip to the seat face: the exposed thread above the fixture plate."""
+    return exposed_thread_m(cfg)
+
+
+def nut_centre_xyz(cfg: NutThreadingConfig, origin_xyz, rotation_xyzw) -> tuple[float, float, float]:
+    """The nut's geometric centre from its body origin (origin_to_lower_face + h/2 along its axis)."""
+    fastener = cfg.fastener
+    up = fastener.nut_origin_to_lower_face_m + fastener.nut_height_m / 2.0
+    offset = rotate(rotation_xyzw, (0.0, 0.0, up))
+    return tuple(float(a + b) for a, b in zip(origin_xyz, offset, strict=True))
 
 
 def _released(nut: NutSnapshot) -> bool:
@@ -111,7 +123,7 @@ def measure(cfg: NutThreadingConfig, snapshot: SceneSnapshot) -> tuple[NutSnapsh
     cross = nut.cross_threaded
     yaw = _relative_yaw(nut.rotation_xyzw, snapshot.fixture_rotation_xyzw)
     if not near:
-        # Off the stud: nothing is engaged, so the next attempt starts clean.
+        # Off the bolt: nothing is engaged, so the next attempt starts clean.
         turns, prev, cross = 0.0, None, False
     else:
         if prev is not None:
@@ -129,7 +141,7 @@ def measure(cfg: NutThreadingConfig, snapshot: SceneSnapshot) -> tuple[NutSnapsh
     engaged = descent >= scoring.min_engagement_turns * fastener.pitch_m
     turn_matched = abs(turns - expected) <= scoring.turn_tolerance
     threaded = aligned and engaged and turn_matched and not cross and gap < travel
-    corner = fastener.across_flats_m / math.sqrt(3.0)
+    corner = fastener.nut_across_flats_m / math.sqrt(3.0)
     lowest = (
         nut.position_xyz[2]
         - abs(dot(nut_axis, (0.0, 0.0, 1.0))) * fastener.nut_height_m / 2.0

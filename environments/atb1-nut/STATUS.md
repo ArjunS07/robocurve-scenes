@@ -2,7 +2,21 @@
 
 ## What this scene is
 
-One approximate M8 × 1.25 nut-and-stud station inspired by the 8 mm nut on NIST Assembly Task Board 1. It is not the full ATB1 board, and it is not built from the NIST CAD; every dimension here is an approximation chosen for simulation. The language instruction is only "Tighten the nut onto the bolt." The 120 s limit and the 100 / 75 / 50 / 25 / 0 tiers live in the scorer.
+An M16 nut-and-bolt station inspired by NIST ATB1, using Isaac Lab's Factory M16 assets (NVIDIA, loaded at runtime). It is not the full ATB1 board, and it is not built from the NIST CAD. The language instruction is only "Tighten the nut onto the bolt." The 120 s limit and the 100 / 75 / 50 / 25 / 0 tiers live in the scorer.
+
+### Why it moved from the M8 box thread to Factory M16
+
+The earlier procedural M8 × 1.25 thread (a helical ridge of tilted box colliders, three pins in the nut) worked only below about 5 mN·m of turning torque. Driven at 2 mN·m it threaded 3 turns at 1.248 mm/turn and the seated, released nut scored 100 (`be4c8c8`). At 5–50 mN·m it skipped turns or threw the nut off the stud, both free and with the nut held upright. A robot gripper turning a nut applies far more than 5 mN·m, so that thread could not be used with a real policy. Isaac Lab's Factory nut and bolt carry real thread meshes with SDF collision and are what Isaac Lab's own nut-threading task uses.
+
+### Layout (all measured from the Factory meshes with usd-core; `config/nut_threading.yaml`)
+
+- Bolt: right-hand, **2.0 mm pitch** (helix fit of the crest points), 35 mm long, hex head 10 mm tall (corner radius 13.86 mm), shank crest radius 7.84 mm. Its origin is the bottom of the head; it stands on the table at (0.55, 0, 0.003).
+- Fixture: a kinematic block. Its lower layer has a pocket around the head (half width 15 mm) and its 9 mm upper plate has a clearance hole around the shank (half width 9 mm, 1.16 mm clear of the crests). The plate top, z = 0.022, is the **seat face** and the fixture origin. No fixture collider touches the bolt.
+- Exposed thread: 35 − 10 − 9 = **16 mm, 8 turns** from the tip to the seat. This is the scorer's travel.
+- Nut: 13 mm tall, 24 mm across flats, 50 g. Its body origin is **10 mm below its lower face**, so it spawns at z = −0.006 to rest flat on a 1 mm start mat (part of the fixture body) 15 cm from the bolt. The scorer and the hold check use the nut's centre, computed from the origin and the nut's axis.
+- Loading: the YAML names the production-bucket URLs (the same bucket as the maple table). `my_package/assets/factory.py` fetches them through Isaac Lab's `retrieve_file_path` into its `/tmp` cache; a fetch failure or a missing local path stops the launch with an error naming the asset and how to override it. Nothing from NVIDIA is stored in this repo.
+- Wrappers: `assets/geometry.py` writes `nut.usda` and `bolt.usda` that reference the cached USDs and author overs. They delete the articulation root (a RigidObject cannot contain one), deactivate the bolt's world fixed joint, and make the bolt kinematic, the same pattern as the fixture, so nothing needs `fix_root_link`. They also set Factory's per-body settings: 192 position iterations, max depenetration velocity 5 m/s, gyroscopic forces, uncapped contact impulse, contact offset 5 mm and rest offset 0 on the SDF meshes, and friction 0.75.
+- **Not set here:** Factory also tunes scene-wide PhysX settings (solver iteration limits, GPU contact buffers, bounce threshold). Those belong to the Arena environment, not this scene, and are left at Arena's defaults.
 
 ## Evidence levels
 
@@ -13,46 +27,36 @@ One approximate M8 × 1.25 nut-and-stud station inspired by the 8 mm nut on NIST
 - maple_table_robolab spawns at the origin; collision top z = 0.003; footprint x [0.1986, 0.8986], y [−0.4779, 0.5221].
 - An articulation whose root prim is not itself the rigid body cannot take `fix_root_link` (battery-remote startup failure). This package no longer uses that pattern.
 
-**Verified on the server, this package** (`tools/physics_check.py --no-render` and the launcher; scripted torque on the nut, no robot):
+**Verified on the server, this package:**
 
-- `launch_nut_threading.py` completes 50 zero-action steps with no false failure (after the ActionTerm properties, observation group, reset-term and frozen-config fixes).
-- Engage: dropped 0.1 mm above the first turn, the nut lands on the ridge (8.038 mm gap vs 8.056 expected). Before the thread contact offset was raised from 0.04 to 0.8 mm the pins tunnelled through every turn and the nut accelerated at ~2 g to the seat.
-- At `be4c8c8`, driven at 2 mN m (free): 3 turns at **1.248 mm/turn** (pitch 1.25), within 0.066 mm of the helix, 1.5° max tilt; released mid-thread it is **retained**; a pull of 2× its weight does not lift it (**held on stud**); seated and released it **scores 100**; backed off at 6 mN m held upright it unscrews 6.5 turns and rises 9.2 mm (**freed**).
-- With 24 segments per turn the three pins crossed seams in lockstep and stalled at 0.39 turns; 32 segments (not a multiple of 3) fixed that.
-- **Robustness limit:** held upright, 2 mN m tracks to 0.032 mm but is slow; 5 mN m reaches the goal at 1.62 mm/turn (partly skipping); 10–20 mN m throw the nut off the stud even with tilt held at 0, as does 20 mN m free. The likely cause is the check's own rate controller: torque builds to the cap at a seam and the 5 g nut spins up when it breaks free. A robot turning the nut by wrist rotation is a different load and **has not been tested**.
+- `launch_nut_threading.py` completed 50 zero-action steps with no false failure with the earlier M8 scene. The Factory M16 scene **has not yet been run on the server**: the bolt as a kinematic SDF body, the wrappers' overs, and threading under a 10–500 mN·m drive are all unverified. Run `tools/physics_check.py` (INTEGRATION.md).
+- Earlier M8 box-thread results, kept for comparison: 2 mN·m threaded at 1.248 mm/turn, was retained when released, held on a pull, scored 100 seated, and backed off free; 5–50 mN·m skipped or threw the nut, free or held upright.
 
-**Code-checked only** (50 pure tests, `python3 tests/run_pure_tests.py`):
+**Code-checked only** (`python3 tests/run_pure_tests.py`):
 
 - quaternions read through `tasks/state_values.py` (xyzw, identity stays identity);
 - recorder and reset callbacks accept lists, tensors, slices, and `None`;
-- gripper body `gripper`; if it or a finger joint is missing, holding is UNKNOWN, a warning prints the live names once, and the nut is never treated as released (no 100 or 50 credit);
-- the generated ridge boxes lie on the helix (parsed back from the USDA), the pins sit on the ridge at every turn, and the turn above blocks a straight pull-off;
-- thread clearances are positive and the thread contact offset (0.8 mm, a detection margin with restOffset 0) is at least the ridge thickness; wedge angle sits between the threaded tilt (2.45°) and the jam tilt (5.36°);
+- gripper body `gripper`; if it or a finger joint is missing, holding is UNKNOWN, a warning prints the live names once, and the nut is never treated as released (no 100 or 50 credit); holding is measured from the finger pad centres;
+- the plate hole and head pocket clear the bolt by more than 1 mm; the fixture boxes do not overlap each other; the nut at its spawn pose touches only the mat top; 16 mm exposed, 8 turns; seat at z = 0.022; nut spawn z from the 10 mm origin offset;
+- the nut and bolt wrappers reference the Factory USDs, remove the articulation root, switch off the bolt's root joint, and carry the Factory settings; a missing asset raises a clear error; Isaac Lab's cache is reused;
+- the scorer's tiers, cross-thread detection at the 2.0 mm pitch, the 1 mm seat tolerance, and the 75% travel tier;
+- wedge angle (5°) above the most a nut can tilt on the thread (4.57°, minor-diameter clearance over the nut height); radial tolerance (1 mm) above the radial play (0.52 mm);
 - robot bases on the measured tabletop, 4 cm inside its edge, 0.31–0.37 m from the station; robot USDA path absolute;
-- generated assets go to `ROBOCURVE_GENERATED_DIR` (the launcher makes a fresh `outputs/assets-*`), never the source tree; tests use temp dirs;
+- generated wrappers go to `ROBOCURVE_GENERATED_DIR` (the launcher makes a fresh `outputs/assets-*`), never the source tree; tests use temp dirs;
 - launcher flags, ordering, and import order.
 
 ## The thread is physical
 
-The stud is a core cylinder (r 3.3 mm) plus a right-hand helical ridge (crest r 4.0 mm, 0.5 mm thick, 173 tilted box colliders, 24 per turn, about 7.2 turns). The nut's bore (r 4.3 mm) carries three pins, 120° apart and stepped by a third of the pitch, reaching to r 3.5 mm. Box tops follow the helix at the pin contact radius, so:
+Turning the nut screws it down the bolt only through PhysX contacts between the two SDF meshes. Nothing is welded, toggled, or snapped at runtime, and the scorer does not enforce threading; it checks every step that rotation and descent agree (cross-thread detection) and that the nut is coaxial. Seating is the nut's face meeting the plate's seat face; tightening torque and preload are not modelled.
 
-- clockwise rotation (seen from above) slides the pins down the ridge, one pitch per turn; counter-clockwise backs the nut off;
-- the ridge turn above each pin blocks pulling the nut straight off (0.25 mm axial play);
-- the lead angle (3.0°) is far below the friction angle (atan 0.6), so a released, partly threaded nut stays put. The 50 tier is now physically reachable;
-- a nut set on the stud tip rests on the ridge start; it is threaded only after it turns.
-
-These are ordinary PhysX contacts between box colliders. Nothing is welded, toggled, or snapped at runtime, and the scorer does not enforce threading; it still checks every step that rotation and descent agree (cross-thread detection) and that the nut is coaxial.
-
-**Not yet demonstrated:** that PhysX resolves these 0.1–0.3 mm clearances stably at dt = 1/120 s with 16 position iterations (thread contact offset 0.8 mm; at 0.04 mm the 942249a server run showed the pins tunnelling through every ridge turn, the nut accelerating at about 2 g to the seat), that the pins neither jam nor tunnel through the ridge, and that the seams between ridge boxes do not snag. `tools/physics_check.py` measures each of these (descent per turn, helix deviation, tilt, release drift, pull-off rise, seat, back-off). If it shows snagging, raise `segments_per_turn`; if pins tunnel, raise solver iterations or lower the drive torque.
-
-Thread form is simplified: rectangular ridge and pins, not a 60° profile, so there is no radial wedging and no preload model. Seating is the nut's face meeting the collar; tightening torque is not modelled.
+**Not yet demonstrated:** that the kinematic SDF bolt threads stably with the nut at dt = 1/120 s under Arena's scene settings, at the torques a gripper applies. `tools/physics_check.py` sweeps 10, 50, 200 and 500 mN·m, free and held upright, then measures descent per turn, helix deviation, tilt, release drift, pull-off rise, seat, and back-off.
 
 ## Other pieces
 
-- Fixture: a kinematic rigid body (no articulation, no fixed joint), so contact cannot move it. The fixture-moved failure (> 5 mm or > 5°) only fires if a reset or another writer moves it.
+- Fixture and bolt: kinematic rigid bodies (no articulation, no fixed joint), so contact cannot move them. The fixture-moved failure (> 5 mm or > 5°) only fires if a reset or another writer moves it.
 - Holding is a GEOMETRIC PROXY: the `gripper` body within 55 mm of the nut with fingers between 5 % and 35 % open. It is not contact-verified.
 - Visible damage is not modelled and there is no force threshold for it.
 - Correction: the YAM USDA does carry collision geometry: 9 colliders per arm, inside instanced link prims (server run c4f4e56). An earlier scan that did not enter instances reported 0, which was wrong. All 9 are enabled (chess-mate ed6aa50 run). The spawn hook only adds colliders to meshes that lack one, so it currently adds none. Not yet run in this scene.
 - Base z assumes the YAM root frame is at the bottom of its base; the base footprint was not measured, hence the 4 cm margin. In chess-mate's check the arm at home spanned about 0.27 m behind its base origin, so at x = 0.25 links may hang past the table's near edge (x = 0.1986); that is clear of the table but unverified for collisions. Reach is unverified.
-- Robot gains (400/150/400), friction (0.6/0.45), and camera intrinsics are provisional.
-- Reset writes the authored nut and fixture poses and clears episode memory; it does not animate an unscrew.
+- Robot gains (400/150/400), fixture friction (0.6/0.45), and camera intrinsics are provisional. Nut and bolt friction (0.75) follow Factory.
+- Reset writes the authored nut, bolt and fixture poses and clears episode memory; it does not animate an unscrew.

@@ -15,6 +15,23 @@ PACKAGE_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_CONFIG_PATH = PACKAGE_ROOT / "config" / "nut_threading.yaml"
 TASK_DESCRIPTION = "Tighten the nut onto the bolt."
 IDENTITY_XYZW = (0.0, 0.0, 0.0, 1.0)
+FASTENER_KEYS = (
+    "nominal",
+    "pitch_m",
+    "handedness",
+    "nut_usd",
+    "bolt_usd",
+    "bolt_length_m",
+    "bolt_head_height_m",
+    "bolt_head_corner_radius_m",
+    "shank_major_radius_m",
+    "shank_minor_radius_m",
+    "nut_height_m",
+    "nut_across_flats_m",
+    "nut_origin_to_lower_face_m",
+    "nut_bore_minor_radius_m",
+    "nut_mass_kg",
+)
 
 
 @dataclass(frozen=True)
@@ -25,25 +42,25 @@ class PoseSpec:
 
 @dataclass(frozen=True)
 class FastenerSpec:
+    """Isaac Lab's Factory M16 nut and bolt, with dimensions measured from their meshes."""
+
     nominal: str
     pitch_m: float
-    turns: float
-    core_radius_m: float
-    major_radius_m: float
-    hole_radius_m: float
-    ridge_thickness_m: float
-    pin_tip_radius_m: float
-    pin_thickness_m: float
-    pin_width_m: float
-    pin_count: int
-    segments_per_turn: int
-    thread_contact_offset_m: float
-    across_flats_m: float
+    handedness: str
+    nut_usd: str
+    bolt_usd: str
+    # Bolt frame: origin at the bottom of the hex head, +z up the shank.
+    bolt_length_m: float
+    bolt_head_height_m: float
+    bolt_head_corner_radius_m: float
+    shank_major_radius_m: float
+    shank_minor_radius_m: float
+    # Nut frame: origin on the axis, nut_origin_to_lower_face_m below the lower face.
     nut_height_m: float
+    nut_across_flats_m: float
+    nut_origin_to_lower_face_m: float
+    nut_bore_minor_radius_m: float
     nut_mass_kg: float
-    lead_in_m: float
-    static_friction: float
-    dynamic_friction: float
 
 
 @dataclass(frozen=True)
@@ -57,8 +74,19 @@ class TableSpec:
 @dataclass(frozen=True)
 class FixtureBodySpec:
     plate_thickness_m: float
-    collar_height_m: float
+    # Square clearance hole around the shank (upper plate) and pocket around the head (lower layer).
+    hole_half_m: float
+    pocket_half_m: float
+    block_half_xy_m: tuple[float, float]
     mass_kg: float
+    static_friction: float
+    dynamic_friction: float
+
+
+@dataclass(frozen=True)
+class StartMatSpec:
+    thickness_m: float
+    half_xy_m: tuple[float, float]
 
 
 @dataclass(frozen=True)
@@ -86,13 +114,17 @@ class GraspSpec:
 @dataclass(frozen=True)
 class PhysicsSpec:
     contact_offset_m: float
-    solver_position_iterations: int
-    solver_velocity_iterations: int
-    # Caps how fast PhysX pushes overlapping bodies apart. Uncapped, a 5 g nut was flung
-    # ~0.7 m when driven at 5 mN m (server sweep at c715f9a).
-    max_depenetration_velocity_m_s: float
-    nut_speculative_ccd: bool
-    nut_max_angular_velocity_deg_s: float
+    # Authored on the Factory nut and bolt, matching Isaac Lab's Factory task.
+    fastener_solver_position_iterations: int
+    fastener_solver_velocity_iterations: int
+    fastener_max_depenetration_velocity_m_s: float
+    fastener_enable_gyroscopic_forces: bool
+    fastener_max_contact_impulse: float
+    fastener_contact_offset_m: float
+    fastener_rest_offset_m: float
+    fastener_friction: float
+    fixture_solver_position_iterations: int
+    fixture_solver_velocity_iterations: int
 
 
 @dataclass(frozen=True)
@@ -137,6 +169,7 @@ class NutThreadingConfig:
     fixture_pose: PoseSpec
     nut_pose: PoseSpec
     fixture_body: FixtureBodySpec
+    start_mat: StartMatSpec
     scoring: ScoringSpec
     grasp: GraspSpec
     physics: PhysicsSpec
@@ -236,6 +269,7 @@ def parse_config(data: dict) -> NutThreadingConfig:
             "fixture_pose",
             "nut_pose",
             "fixture_body",
+            "start_mat",
             "scoring",
             "grasp",
             "physics",
@@ -245,35 +279,25 @@ def parse_config(data: dict) -> NutThreadingConfig:
         "config",
     )
     fastener_data = _mapping(root["fastener"], "fastener")
-    _exact_keys(
-        fastener_data,
-        (
-            "nominal",
-            "pitch_m",
-            "turns",
-            "core_radius_m",
-            "major_radius_m",
-            "hole_radius_m",
-            "ridge_thickness_m",
-            "pin_tip_radius_m",
-            "pin_thickness_m",
-            "pin_width_m",
-            "pin_count",
-            "segments_per_turn",
-            "thread_contact_offset_m",
-            "across_flats_m",
-            "nut_height_m",
-            "nut_mass_kg",
-            "lead_in_m",
-            "static_friction",
-            "dynamic_friction",
-        ),
-        "fastener",
-    )
+    _exact_keys(fastener_data, FASTENER_KEYS, "fastener")
     table_data = _mapping(root["table"], "table")
     _exact_keys(table_data, ("center_xy", "half_extents_xy", "top_z_m", "fall_below_m"), "table")
     body_data = _mapping(root["fixture_body"], "fixture_body")
-    _exact_keys(body_data, ("plate_thickness_m", "collar_height_m", "mass_kg"), "fixture_body")
+    _exact_keys(
+        body_data,
+        (
+            "plate_thickness_m",
+            "hole_half_m",
+            "pocket_half_m",
+            "block_half_xy_m",
+            "mass_kg",
+            "static_friction",
+            "dynamic_friction",
+        ),
+        "fixture_body",
+    )
+    mat_data = _mapping(root["start_mat"], "start_mat")
+    _exact_keys(mat_data, ("thickness_m", "half_xy_m"), "start_mat")
     scoring_data = _mapping(root["scoring"], "scoring")
     _exact_keys(
         scoring_data,
@@ -299,11 +323,16 @@ def parse_config(data: dict) -> NutThreadingConfig:
         physics_data,
         (
             "contact_offset_m",
-            "solver_position_iterations",
-            "solver_velocity_iterations",
-            "max_depenetration_velocity_m_s",
-            "nut_speculative_ccd",
-            "nut_max_angular_velocity_deg_s",
+            "fastener_solver_position_iterations",
+            "fastener_solver_velocity_iterations",
+            "fastener_max_depenetration_velocity_m_s",
+            "fastener_enable_gyroscopic_forces",
+            "fastener_max_contact_impulse",
+            "fastener_contact_offset_m",
+            "fastener_rest_offset_m",
+            "fastener_friction",
+            "fixture_solver_position_iterations",
+            "fixture_solver_velocity_iterations",
         ),
         "physics",
     )
@@ -336,25 +365,10 @@ def parse_config(data: dict) -> NutThreadingConfig:
         fastener=FastenerSpec(
             nominal=_text(fastener_data["nominal"], "fastener.nominal"),
             pitch_m=_number(fastener_data["pitch_m"], "fastener.pitch_m"),
-            turns=_number(fastener_data["turns"], "fastener.turns"),
-            core_radius_m=_number(fastener_data["core_radius_m"], "fastener.core_radius_m"),
-            major_radius_m=_number(fastener_data["major_radius_m"], "fastener.major_radius_m"),
-            hole_radius_m=_number(fastener_data["hole_radius_m"], "fastener.hole_radius_m"),
-            ridge_thickness_m=_number(fastener_data["ridge_thickness_m"], "fastener.ridge_thickness_m"),
-            pin_tip_radius_m=_number(fastener_data["pin_tip_radius_m"], "fastener.pin_tip_radius_m"),
-            pin_thickness_m=_number(fastener_data["pin_thickness_m"], "fastener.pin_thickness_m"),
-            pin_width_m=_number(fastener_data["pin_width_m"], "fastener.pin_width_m"),
-            pin_count=_integer(fastener_data["pin_count"], "fastener.pin_count"),
-            segments_per_turn=_integer(fastener_data["segments_per_turn"], "fastener.segments_per_turn"),
-            thread_contact_offset_m=_number(
-                fastener_data["thread_contact_offset_m"], "fastener.thread_contact_offset_m"
-            ),
-            across_flats_m=_number(fastener_data["across_flats_m"], "fastener.across_flats_m"),
-            nut_height_m=_number(fastener_data["nut_height_m"], "fastener.nut_height_m"),
-            nut_mass_kg=_number(fastener_data["nut_mass_kg"], "fastener.nut_mass_kg"),
-            lead_in_m=_number(fastener_data["lead_in_m"], "fastener.lead_in_m"),
-            static_friction=_number(fastener_data["static_friction"], "fastener.static_friction"),
-            dynamic_friction=_number(fastener_data["dynamic_friction"], "fastener.dynamic_friction"),
+            handedness=_text(fastener_data["handedness"], "fastener.handedness"),
+            nut_usd=_text(fastener_data["nut_usd"], "fastener.nut_usd"),
+            bolt_usd=_text(fastener_data["bolt_usd"], "fastener.bolt_usd"),
+            **{key: _number(fastener_data[key], f"fastener.{key}") for key in FASTENER_KEYS[5:]},
         ),
         table=TableSpec(
             center_xy=_vector(table_data["center_xy"], "table.center_xy", 2),
@@ -366,8 +380,16 @@ def parse_config(data: dict) -> NutThreadingConfig:
         nut_pose=_pose(root["nut_pose"], "nut_pose"),
         fixture_body=FixtureBodySpec(
             plate_thickness_m=_number(body_data["plate_thickness_m"], "fixture_body.plate_thickness_m"),
-            collar_height_m=_number(body_data["collar_height_m"], "fixture_body.collar_height_m"),
+            hole_half_m=_number(body_data["hole_half_m"], "fixture_body.hole_half_m"),
+            pocket_half_m=_number(body_data["pocket_half_m"], "fixture_body.pocket_half_m"),
+            block_half_xy_m=_vector(body_data["block_half_xy_m"], "fixture_body.block_half_xy_m", 2),
             mass_kg=_number(body_data["mass_kg"], "fixture_body.mass_kg"),
+            static_friction=_number(body_data["static_friction"], "fixture_body.static_friction"),
+            dynamic_friction=_number(body_data["dynamic_friction"], "fixture_body.dynamic_friction"),
+        ),
+        start_mat=StartMatSpec(
+            thickness_m=_number(mat_data["thickness_m"], "start_mat.thickness_m"),
+            half_xy_m=_vector(mat_data["half_xy_m"], "start_mat.half_xy_m", 2),
         ),
         scoring=ScoringSpec(
             lift_clearance_m=_number(scoring_data["lift_clearance_m"], "scoring.lift_clearance_m"),
@@ -393,16 +415,32 @@ def parse_config(data: dict) -> NutThreadingConfig:
         ),
         physics=PhysicsSpec(
             contact_offset_m=_number(physics_data["contact_offset_m"], "physics.contact_offset_m"),
-            solver_position_iterations=int(_number(physics_data["solver_position_iterations"], "physics.solver_position_iterations")),
-            solver_velocity_iterations=int(
-                _number(physics_data["solver_velocity_iterations"], "physics.solver_velocity_iterations")
+            fastener_solver_position_iterations=_integer(
+                physics_data["fastener_solver_position_iterations"], "physics.fastener_solver_position_iterations"
             ),
-            max_depenetration_velocity_m_s=_number(
-                physics_data["max_depenetration_velocity_m_s"], "physics.max_depenetration_velocity_m_s"
+            fastener_solver_velocity_iterations=_integer(
+                physics_data["fastener_solver_velocity_iterations"], "physics.fastener_solver_velocity_iterations"
             ),
-            nut_speculative_ccd=_flag(physics_data["nut_speculative_ccd"], "physics.nut_speculative_ccd"),
-            nut_max_angular_velocity_deg_s=_number(
-                physics_data["nut_max_angular_velocity_deg_s"], "physics.nut_max_angular_velocity_deg_s"
+            fastener_max_depenetration_velocity_m_s=_number(
+                physics_data["fastener_max_depenetration_velocity_m_s"],
+                "physics.fastener_max_depenetration_velocity_m_s",
+            ),
+            fastener_enable_gyroscopic_forces=_flag(
+                physics_data["fastener_enable_gyroscopic_forces"], "physics.fastener_enable_gyroscopic_forces"
+            ),
+            fastener_max_contact_impulse=_number(
+                physics_data["fastener_max_contact_impulse"], "physics.fastener_max_contact_impulse"
+            ),
+            fastener_contact_offset_m=_number(
+                physics_data["fastener_contact_offset_m"], "physics.fastener_contact_offset_m"
+            ),
+            fastener_rest_offset_m=_number(physics_data["fastener_rest_offset_m"], "physics.fastener_rest_offset_m"),
+            fastener_friction=_number(physics_data["fastener_friction"], "physics.fastener_friction"),
+            fixture_solver_position_iterations=_integer(
+                physics_data["fixture_solver_position_iterations"], "physics.fixture_solver_position_iterations"
+            ),
+            fixture_solver_velocity_iterations=_integer(
+                physics_data["fixture_solver_velocity_iterations"], "physics.fixture_solver_velocity_iterations"
             ),
         ),
         robot=RobotSpec(
@@ -428,28 +466,39 @@ def parse_config(data: dict) -> NutThreadingConfig:
     return config
 
 
-def threaded_tilt_deg(fastener: FastenerSpec) -> float:
-    """Largest tilt of a nut whose pins sit in the groove: axial play across the pin circle."""
-    import math
-
-    play = fastener.pitch_m - fastener.ridge_thickness_m - fastener.pin_thickness_m
-    pin_radius = 0.5 * (fastener.pin_tip_radius_m + fastener.hole_radius_m)
-    # Three pins at 120 deg: the shortest lever between a pin and the line through the other two is 1.5 r.
-    return math.degrees(math.atan2(play, 1.5 * pin_radius))
+def exposed_thread_m(config: NutThreadingConfig) -> float:
+    """Shank above the fixture plate: how far the nut's lower face travels from the tip to the seat."""
+    fastener = config.fastener
+    return fastener.bolt_length_m - fastener.bolt_head_height_m - config.fixture_body.plate_thickness_m
 
 
-def jam_tilt_deg(fastener: FastenerSpec) -> float:
-    """Largest tilt a nut can reach while its bore still surrounds the threaded stud.
+def turns_to_seat(config: NutThreadingConfig) -> float:
+    return exposed_thread_m(config) / config.fastener.pitch_m
 
-    Solves h*sin(t) + 2*r_major*cos(t) = 2*r_hole, the tilted bore just spanning the ridge.
+
+def bolt_position_xyz(config: NutThreadingConfig) -> tuple[float, float, float]:
+    """The bolt origin (bottom of the head) sits on the table, under the fixture's seat face."""
+    x, y, _ = config.fixture_pose.position_xyz
+    return (x, y, config.table.top_z_m)
+
+
+def start_mat_top_z(config: NutThreadingConfig) -> float:
+    return config.table.top_z_m + config.start_mat.thickness_m
+
+
+def nut_spawn_z(config: NutThreadingConfig) -> float:
+    """The nut origin is below its lower face, so it spawns below the mat top it rests on."""
+    return start_mat_top_z(config) - config.fastener.nut_origin_to_lower_face_m
+
+
+def threaded_tilt_bound_deg(fastener: FastenerSpec) -> float:
+    """Upper bound on the tilt of a nut whose threads interleave the bolt's.
+
+    The diametral clearance between the nut's minor diameter and the bolt's minor diameter,
+    across the nut height. Thread flanks hold the nut tighter than this.
     """
-    import math
-
-    h = fastener.nut_height_m
-    d = 2.0 * fastener.major_radius_m
-    bore = 2.0 * fastener.hole_radius_m
-    amplitude = math.hypot(h, d)
-    return math.degrees(math.asin(min(1.0, bore / amplitude)) - math.atan2(d, h))
+    clearance = 2.0 * (fastener.nut_bore_minor_radius_m - fastener.shank_minor_radius_m)
+    return math.degrees(math.atan2(clearance, fastener.nut_height_m))
 
 
 def validate_config(config: NutThreadingConfig) -> None:
@@ -458,37 +507,32 @@ def validate_config(config: NutThreadingConfig) -> None:
         raise ValueError(f"task_description must be {TASK_DESCRIPTION!r}")
     _close(config.episode_length_s, 120.0, "episode_length_s")
     fastener = config.fastener
-    if fastener.nominal != "M8":
-        raise ValueError("fastener.nominal must be M8")
-    if not 6.0 < fastener.turns < 7.0:
-        raise ValueError(f"fastener.turns must be between 6 and 7, got {fastener.turns}")
-    _close(fastener.pitch_m, 0.00125, "fastener.pitch_m")
-    _validate_thread(fastener)
-    if fastener.nut_height_m <= 0.0 or fastener.lead_in_m <= 0.0:
-        raise ValueError("nut height and lead-in must be positive")
-    if not 0.0 < fastener.dynamic_friction <= fastener.static_friction:
-        raise ValueError("friction must be positive with dynamic <= static")
-    play = fastener.pin_tip_radius_m - fastener.core_radius_m
-    if config.scoring.radial_max_m < play:
-        raise ValueError("scoring.radial_max_m must cover the pins' radial play on the core")
-    if config.scoring.wedge_angle_deg >= jam_tilt_deg(fastener):
+    if fastener.nominal != "M16":
+        raise ValueError("fastener.nominal must be M16")
+    _close(fastener.pitch_m, 0.002, "fastener.pitch_m")
+    if fastener.handedness != "right":
+        raise ValueError("fastener.handedness must be right (measured from the Factory bolt mesh)")
+    for key in ("nut_usd", "bolt_usd"):
+        url = getattr(fastener, key)
+        if not (url.startswith("https://") or Path(url).is_absolute()) or not url.endswith(".usd"):
+            raise ValueError(f"fastener.{key} must be an https URL or absolute path to a .usd file, got {url!r}")
+    _validate_fastener_fit(config)
+    _validate_fixture(config)
+    if config.scoring.radial_max_m < fastener.nut_bore_minor_radius_m - fastener.shank_minor_radius_m:
+        raise ValueError("scoring.radial_max_m must cover the nut's radial play on the bolt")
+    if config.scoring.wedge_angle_deg <= threaded_tilt_bound_deg(fastener):
         raise ValueError(
-            f"scoring.wedge_angle_deg must be below the jam tilt {jam_tilt_deg(fastener):.2f} deg, "
-            "or a nut jammed on the stud reads as aligned"
-        )
-    if config.scoring.wedge_angle_deg <= threaded_tilt_deg(fastener):
-        raise ValueError(
-            f"scoring.wedge_angle_deg must exceed the threaded tilt {threaded_tilt_deg(fastener):.2f} deg, "
-            "or a correctly threaded nut reads as wedged"
+            f"scoring.wedge_angle_deg must exceed {threaded_tilt_bound_deg(fastener):.2f} deg, "
+            "the most a nut can tilt on the thread, or a threaded nut reads as wedged"
         )
     _validate_robot_mount(config)
     if not 0.0 <= config.grasp.hold_open_fraction_min < config.grasp.hold_open_fraction_max <= 1.0:
         raise ValueError("grasp open fractions must satisfy 0 <= min < max <= 1")
-    _close(config.nut_pose.position_xyz[2], config.table.top_z_m + fastener.nut_height_m / 2.0, "nut z")
+    _close(config.nut_pose.position_xyz[2], nut_spawn_z(config), "nut z (origin below the mat top)")
     _close(
         config.fixture_pose.position_xyz[2],
-        config.table.top_z_m + config.fixture_body.plate_thickness_m + config.fixture_body.collar_height_m,
-        "fixture z",
+        config.table.top_z_m + fastener.bolt_head_height_m + config.fixture_body.plate_thickness_m,
+        "fixture z (seat face: table + bolt head + plate)",
     )
     for pose, label in ((config.nut_pose, "nut"), (config.fixture_pose, "fixture")):
         for actual, expected in zip(pose.rotation_xyzw, IDENTITY_XYZW, strict=True):
@@ -508,12 +552,17 @@ def validate_config(config: NutThreadingConfig) -> None:
         raise ValueError("robot.usd_path must be absolute so launching does not depend on the working directory")
     if config.robot.finger_open_m >= 0.0 or config.robot.finger_closed_m != 0.0:
         raise ValueError("finger open is negative and finger closed is zero")
-    if config.physics.solver_position_iterations < 16 or config.physics.solver_velocity_iterations < 1:
-        raise ValueError("solver iterations must be at least 16 position and 1 velocity")
-    if not 0.0 < config.physics.max_depenetration_velocity_m_s <= 1.0:
-        raise ValueError("max_depenetration_velocity_m_s must be in (0, 1] m/s")
-    if not 360.0 <= config.physics.nut_max_angular_velocity_deg_s <= 7200.0:
-        raise ValueError("nut_max_angular_velocity_deg_s must be 1-20 turns/s (360-7200 deg/s)")
+    physics = config.physics
+    if physics.fastener_solver_position_iterations < 32 or physics.fastener_solver_velocity_iterations < 1:
+        raise ValueError("fastener solver iterations must be at least 32 position and 1 velocity")
+    if physics.fixture_solver_position_iterations < 16 or physics.fixture_solver_velocity_iterations < 1:
+        raise ValueError("fixture solver iterations must be at least 16 position and 1 velocity")
+    if physics.fastener_max_depenetration_velocity_m_s <= 0.0 or physics.fastener_max_contact_impulse <= 0.0:
+        raise ValueError("fastener depenetration velocity and contact impulse must be positive")
+    if not 0.0 <= physics.fastener_rest_offset_m < physics.fastener_contact_offset_m:
+        raise ValueError("fastener offsets must satisfy 0 <= rest < contact")
+    if physics.fastener_friction <= 0.0:
+        raise ValueError("fastener friction must be positive")
     names = [camera.name for camera in config.cameras]
     if names != ["overhead", "front", "side"]:
         raise ValueError(f"cameras must be overhead, front, side in that order, got {names}")
@@ -523,45 +572,47 @@ def validate_config(config: NutThreadingConfig) -> None:
             _close(actual, wanted, f"camera {camera.name} rotation", tol=1e-5)
 
 
-def _validate_thread(fastener: FastenerSpec) -> None:
-    """Clearances of the physical thread, and a contact offset large enough to stop tunnelling.
+def _validate_fastener_fit(config: NutThreadingConfig) -> None:
+    fastener = config.fastener
+    for key in FASTENER_KEYS[5:]:
+        if getattr(fastener, key) <= 0.0:
+            raise ValueError(f"fastener.{key} must be positive")
+    if not fastener.shank_minor_radius_m < fastener.nut_bore_minor_radius_m < fastener.shank_major_radius_m:
+        raise ValueError("the nut's minor radius must lie between the bolt's minor and major radii (threads interleave)")
+    if fastener.shank_major_radius_m >= fastener.bolt_head_corner_radius_m:
+        raise ValueError("the bolt head must be wider than the shank")
+    turns = turns_to_seat(config)
+    if not 6.0 <= turns <= 10.0:
+        raise ValueError(f"the exposed thread must take 6-10 turns to seat, got {turns:.2f}")
+    if exposed_thread_m(config) <= fastener.nut_height_m:
+        raise ValueError("the exposed thread must be longer than the nut")
 
-    The contact offset is a detection margin (restOffset is 0), not a gap, so it is not
-    compared with the clearances. It must be at least the ridge thickness: otherwise a pin
-    can pass the ridge midline before contact starts and get pushed through (server 942249a).
-    """
-    offset = fastener.thread_contact_offset_m
-    gaps = {
-        "bore wall to ridge": fastener.hole_radius_m - fastener.major_radius_m,
-        "pin tip to core": fastener.pin_tip_radius_m - fastener.core_radius_m,
-        "axial groove": (fastener.pitch_m - fastener.ridge_thickness_m - fastener.pin_thickness_m) / 2.0,
-    }
-    for name, gap in gaps.items():
-        if gap <= 0.0:
-            raise ValueError(f"thread clearance {name} is {gap * 1000:.3f} mm; it must be positive")
-    if offset < fastener.ridge_thickness_m:
-        raise ValueError(
-            f"thread contact offset {offset * 1000:.3f} mm is below the ridge thickness "
-            f"{fastener.ridge_thickness_m * 1000:.3f} mm; pins would tunnel through the ridge"
-        )
-    overlap = fastener.major_radius_m - fastener.pin_tip_radius_m
-    if overlap <= 2.0 * (fastener.pin_tip_radius_m - fastener.core_radius_m):
-        raise ValueError("pins must overlap the ridge by more than twice their radial play, or they can slip past it")
-    if not fastener.core_radius_m < fastener.pin_tip_radius_m < fastener.major_radius_m < fastener.hole_radius_m:
-        raise ValueError("thread radii must satisfy core < pin tip < major < bore")
-    if fastener.hole_radius_m >= fastener.across_flats_m / 2.0:
-        raise ValueError("nut bore must be inside the hex flats")
-    if fastener.pin_count < 3:
-        raise ValueError("pin_count must be at least 3 to support the nut")
-    if fastener.segments_per_turn < 12:
-        raise ValueError("segments_per_turn must be at least 12")
-    if math.gcd(fastener.segments_per_turn, fastener.pin_count) != 1:
-        raise ValueError(
-            "segments_per_turn must share no factor with pin_count, or several pins cross a ridge seam at once"
-        )
-    span = fastener.pitch_m * (fastener.pin_count - 1) / fastener.pin_count + fastener.pin_thickness_m
-    if span >= fastener.nut_height_m / 2.0:
-        raise ValueError("the pin stack must fit in the lower half of the nut")
+
+def _validate_fixture(config: NutThreadingConfig) -> None:
+    """The fixture holds the bolt without touching it, and the start mat stays clear of the bolt."""
+    fastener = config.fastener
+    body = config.fixture_body
+    mat = config.start_mat
+    if body.plate_thickness_m <= 0.0 or mat.thickness_m <= 0.0:
+        raise ValueError("plate and mat thickness must be positive")
+    if body.hole_half_m <= fastener.shank_major_radius_m:
+        raise ValueError("the plate hole must clear the shank's thread crests")
+    if body.hole_half_m >= fastener.nut_across_flats_m / 2.0:
+        raise ValueError("the plate hole must be narrower than the nut's flats so the plate top is the seat face")
+    if body.pocket_half_m <= fastener.bolt_head_corner_radius_m:
+        raise ValueError("the head pocket must clear the bolt head's corners")
+    if min(body.block_half_xy_m) <= body.pocket_half_m:
+        raise ValueError("the block must be wider than the head pocket")
+    if not 0.0 < body.dynamic_friction <= body.static_friction:
+        raise ValueError("fixture friction must be positive with dynamic <= static")
+    if mat.half_xy_m[0] < fastener.nut_across_flats_m / 2.0 or mat.half_xy_m[1] < fastener.nut_across_flats_m / 2.0:
+        raise ValueError("the start mat must be at least as wide as the nut")
+    mat_x = config.nut_pose.position_xyz[0] - config.fixture_pose.position_xyz[0]
+    mat_y = config.nut_pose.position_xyz[1] - config.fixture_pose.position_xyz[1]
+    clear_x = abs(mat_x) >= mat.half_xy_m[0] + body.block_half_xy_m[0]
+    clear_y = abs(mat_y) >= mat.half_xy_m[1] + body.block_half_xy_m[1]
+    if not (clear_x or clear_y):
+        raise ValueError("the start mat under the nut must not overlap the fixture block")
 
 
 # The YAM base footprint is not measured yet; keep the base origin this far inside the table edge.

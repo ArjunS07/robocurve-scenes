@@ -1,9 +1,10 @@
-"""USD spawn configs for the nut and the fixture.
+"""USD spawn configs for the nut, the bolt and the fixture.
 
-Both are plain rigid objects. Mass, collision, contact offsets, friction, solver
-counts, and the fixture's kinematic flag are authored in the generated USDA, so
-UsdFileCfg only gets the path, scale, and contact-sensor flag. The fixture is
-not an articulation: a kinematic body needs no fix_root_link, which this
+All three are plain rigid objects. Mass, collision, contact offsets, friction,
+solver counts, and the kinematic flags are authored in the generated USDA (the
+fixture, and wrappers around the Factory nut and bolt), so
+UsdFileCfg only gets the path, scale, and contact-sensor flag. The fixture and
+bolt are not articulations: a kinematic body needs no fix_root_link, which this
 Isaac Lab build cannot apply to an articulation whose root prim is not itself
 the rigid body (the battery-remote startup failure).
 """

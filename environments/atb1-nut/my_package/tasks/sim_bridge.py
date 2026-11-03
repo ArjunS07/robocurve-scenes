@@ -10,6 +10,7 @@ from __future__ import annotations
 from my_package.embodiments.action_map import FINGER_JOINTS
 from my_package.embodiments.grasp import any_arm_holding, hold_known, mean_open_fraction
 from my_package.scoring.math3d import norm, rotate, sub
+from my_package.scoring.scorer import nut_centre_xyz
 from my_package.scoring.snapshot import NutSnapshot, SceneSnapshot
 from my_package.tasks.runtime_state import EpisodeRuntime
 from my_package.tasks.state_values import env_indices, quaternion_xyzw
@@ -138,7 +139,9 @@ def observe_snapshot(env, cfg, env_index: int) -> SceneSnapshot:
         raise RuntimeError("nut threading scene is missing the nut or the fixture") from exc
     nut_world, nut_quat = _root_pose_w(nut_asset, env_index)
     fixture_world, fixture_quat = _root_pose_w(fixture_asset, env_index)
-    nut_position = env_local_position(nut_world, origin)
+    nut_rotation = quaternion_xyzw(nut_quat)
+    # The Factory nut's body origin is below its lower face; score and hold from its centre.
+    nut_position = nut_centre_xyz(cfg, env_local_position(nut_world, origin), nut_rotation)
     robot = cfg.robot
     arms = []
     for scene_name, side in _robots(env, robot.layout):
@@ -169,7 +172,7 @@ def observe_snapshot(env, cfg, env_index: int) -> SceneSnapshot:
     return SceneSnapshot(
         nut=NutSnapshot(
             position_xyz=nut_position,
-            rotation_xyzw=quaternion_xyzw(nut_quat),
+            rotation_xyzw=nut_rotation,
             gripper_holding=holding,
             released=known and not holding,
             off_table=False,
