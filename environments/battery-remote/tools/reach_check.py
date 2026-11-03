@@ -573,6 +573,13 @@ def main() -> None:
         try:
             calibrate(side, delta=0.02)
             at = reach(side, (x, y, z), orient=True, retries=0)
+            if not at["reached"]:
+                # The right arm stopped 22 mm short in X (c9c5606). Back off 3 cm into free air,
+                # re-measure there and come down again; never re-measure at the cell.
+                first = at["residual_mm"]
+                reach(side, (x, y, z + 0.03), orient=True, retries=0)
+                calibrate(side, delta=0.02)
+                at = dict(reach(side, (x, y, z), orient=True, retries=0), first_attempt_residual_mm=first)
             boxes = _stage({}, "boxes", lambda: grasp_geometry(side, name))
             finger_cmd[side] = cfg.robot.finger_closed_m
             step(int(1.0 / dt))
@@ -580,7 +587,11 @@ def main() -> None:
             pads_after = pad_centres(side)
             pad_gap_mm = round(1000 * float(torch.linalg.norm(pads_after[0] - pads_after[1])), 1)
             start_z = float(_tensor(cell.data.root_pos_w)[0, 2])
-            reach(side, (x, y, z + 0.05), orient=True, retries=0)
+            after_close = {
+                "cell_centre_mm": [round(1000 * float(v), 1) for v in _tensor(cell.data.root_pos_w)[0]],
+                "pads_mm": [[round(1000 * float(v), 1) for v in pad] for pad in pads_after],
+            }
+            lift = reach(side, (x, y, z + 0.05), orient=True, retries=0)
         finally:
             layout[side] = saved_layout
             if saved_jac is not None:
@@ -600,6 +611,9 @@ def main() -> None:
             "lifted": rise > 0.03,
             "gripper_axes_at_grasp": at["gripper_axes_world"],
             "before_close": boxes,
+            "after_close": after_close,
+            "lift": {k: lift.get(k) for k in ("reached", "residual_mm", "start_residual_mm", "joints_at_limit")},
+            "cell_after_lift_mm": [round(1000 * float(v), 1) for v in _tensor(cell.data.root_pos_w)[0]],
             "pad_gap_after_close_mm": pad_gap_mm,
             "cell_diameter_mm": round(1000 * cfg.battery.diameter_m, 1),
             "approach_tilt_from_down_deg": at["approach_tilt_from_down_deg"],

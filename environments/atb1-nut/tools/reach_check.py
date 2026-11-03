@@ -714,11 +714,42 @@ def main() -> None:
         # 20 mm off the axis and below the tip level: it struck the bolt on the way. Rise first,
         # cross at a safe height, then come down on the axis.
         safe_z = target_centre_z + grip["dz"] + 0.06
+
+        def air_reach(goal):
+            """Free-air reach with the nut held; re-measure the Jacobian here and retry on a miss.
+            c9c5606 ended these legs 11-41 mm off with the Jacobian measured over the mat."""
+            row = reach(side, goal, across=across)
+            if not row["reached"]:
+                first = row["residual_mm"]
+                calibrate(side, delta=0.02)
+                row = dict(reach(side, goal, across=across), recalibrated=True, first_residual_mm=first)
+            return row
+
+        def nut_reach(centre_goal, passes=2):
+            """Steer the nut's centre, not the pads: the nut can sit off-centre or tilted in the grip."""
+            goal = torch.tensor(centre_goal, device=device)
+            row = None
+            for _ in range(passes):
+                tip_goal = tip_mid(side) + (goal - torch.tensor(nut_state()["centre"], device=device))
+                row = reach(side, tuple(float(v) for v in tip_goal), across=across)
+            state = nut_state()
+            row["nut_centre_error_mm"] = [round(1000 * (a - b), 1) for a, b in zip(state["centre"], centre_goal)]
+            return row
+
         now = tip_mid(side)
-        rise = reach(side, (float(now[0]), float(now[1]), max(safe_z, float(now[2]))), across=across)
-        high = reach(side, (fx, fy, safe_z), across=across)
-        above = reach(side, (fx, fy, target_centre_z + grip["dz"] + 0.02), across=across)
-        over = reach(side, (fx, fy, target_centre_z + grip["dz"]), across=across)
+        rise = air_reach((float(now[0]), float(now[1]), max(safe_z, float(now[2]))))
+        high = nut_reach((fx, fy, safe_z - grip["dz"]))
+        state = nut_state()
+        high["nut_tilt_deg"] = round(state["tilt_deg"], 1)
+        if state["radial_m"] > 0.004 or state["tilt_deg"] > 10.0:
+            # Coming down from here would strike the bolt, as in a5f5537 and c9c5606.
+            raise RuntimeError(
+                f"nut not over the bolt at safe height: radial {1000 * state['radial_m']:.1f} mm, "
+                f"tilt {state['tilt_deg']:.1f} deg, rise residual {rise['residual_mm']} mm, high residual {high['residual_mm']} mm"
+            )
+        calibrate(side, delta=0.02)  # local Jacobian for the short descent onto the tip
+        above = nut_reach((fx, fy, target_centre_z + 0.02))
+        over = nut_reach((fx, fy, target_centre_z))
         state = nut_state()
         return {
             "rise": rise,

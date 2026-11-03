@@ -40,6 +40,7 @@ def battery() -> None:
             continue
         print("grasp", name, pick(row, keys + ("approach_tilt_from_down_deg", "finger_axis_off_world_y_deg", "fingers_stopped_by_cell")))
         print("   before_close", row.get("before_close"))
+        print("   after_close", row.get("after_close"), "lift", row.get("lift"), "cell_after_lift", row.get("cell_after_lift_mm"))
         mirrored = row.get("from_mirrored_seed")
         if mirrored:
             print("   mirrored:", mirrored if "error" in mirrored else pick(mirrored, keys))
@@ -63,7 +64,8 @@ def nut() -> None:
           "at", pick(g.get("at", {}), ("residual_mm", "approach_tilt_from_down_deg", "finger_axis_off_target_deg")))
     c = r.get("carry", {})
     print("carry", pick(c, ("error", "nut_radial_mm", "nut_tilt_deg", "nut_gap_mm", "held")),
-          {k: (c.get(k) or {}).get("residual_mm") for k in ("rise", "high", "above_tip", "over_tip")})
+          {k: pick(c.get(k) or {}, ("residual_mm", "first_residual_mm", "nut_centre_error_mm", "nut_tilt_deg"))
+           for k in ("rise", "high", "above_tip", "over_tip")})
     print("lower", pick(r.get("lower", {}), ("error", "nut_gap_mm", "travel_mm", "rests_on_tip", "nut_radial_mm", "nut_tilt_deg")))
     t = r.get("turn", {})
     print("turn", pick(t, ("error", "error_at", "stop", "strokes_run", "nut_turns", "descent_mm", "descent_per_turn_mm",
