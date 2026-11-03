@@ -12,7 +12,9 @@ gripper body's linear Jacobian (position only):
 
 - above and at each cell, and above each slot's seat
 - a grasp attempt on each cell: open, descend, close, lift 5 cm, and check that the
-  cell came up with the fingers
+  cell came up with the fingers; a miss is retried from home with joint1 mirrored
+- a robot insertion: grasp a cell, tilt it, dip its negative end into the slot, push the
+  spring plunger in, release, and apply the scorer's seated test
 
 It reports the residual position error, joints sitting at a limit, and the gripper
 frame's axes in the world at each target, so it is clear whether a top-down grasp
@@ -66,6 +68,8 @@ def main() -> None:
     parser.add_argument("--approach-m", type=float, default=0.08, help="Height above a target for the approach pose.")
     parser.add_argument("--tolerance-m", type=float, default=0.004, help="Fingertip position error that counts as reached.")
     parser.add_argument("--reach-s", type=float, default=4.0, help="Simulated time allowed per target.")
+    parser.add_argument("--insert-tilt-deg", type=float, default=30.0, help="Cell tilt about the finger axis while dipping its spring end into the slot.")
+    parser.add_argument("--hold-s", type=float, default=1.5, help="Settle time after releasing the inserted cell.")
     parser.add_argument("--out", type=Path, default=None)
     args = parser.parse_args()
 
@@ -88,12 +92,19 @@ def main() -> None:
     import isaaclab.sim as sim_utils
     from isaaclab.assets import Articulation, RigidObject
 
-    from my_package.assets.geometry import rest_center_z, write_geometry
+    from my_package.assets.geometry import measure_battery, rest_center_z, spring_side, write_geometry
     from my_package.assets.spawn import make_battery, make_remote
     from my_package.assets.table import maple_table_usd
     from my_package.embodiments.yam_bimanual import _articulation
     from my_package.scoring.action_map import arm_bindings
-    from my_package.scoring.config import active_slots, battery_pose, cell_names, default_config_path, load_config
+    from my_package.scoring.config import (
+        active_slots,
+        battery_pose,
+        cell_names,
+        default_config_path,
+        load_config,
+        plunger_joint_name,
+    )
     from my_package.scoring.math3d import local_to_world
 
     cfg = load_config(default_config_path())
@@ -209,6 +220,7 @@ def main() -> None:
         )
 
     approach_local = {}
+    orient_goal = {"tilt_y_deg": 0.0, "approach_weight": 0.3}
 
     def measure_approach_axis(side):
         """Gripper-frame direction from the gripper origin to the fingertip midpoint, at home."""
@@ -232,11 +244,14 @@ def main() -> None:
         left_pad, right_pad = pad_centres(side)
         finger = right_pad - left_pad
         finger = finger / max(float(torch.linalg.norm(finger)), 1e-6)
-        down = torch.tensor([0.0, 0.0, -1.0], device=device)
+        # Insertion tilts the held cell about world Y (the finger axis) to dip one end into the
+        # bay first; otherwise the approach goal is straight down.
+        theta = math.radians(orient_goal["tilt_y_deg"])
+        down = torch.tensor([-math.sin(theta), 0.0, -math.cos(theta)], device=device)
         # Fingers must close horizontally across the cell: along world +-Y. Only being
         # perpendicular to X let them close vertically, one above the cell and one under it.
         across = torch.tensor([0.0, 1.0 if float(finger[1]) >= 0 else -1.0, 0.0], device=device)
-        err = torch.linalg.cross(finger, across) + 0.3 * torch.linalg.cross(approach, down)
+        err = torch.linalg.cross(finger, across) + orient_goal["approach_weight"] * torch.linalg.cross(approach, down)
         tilt = math.degrees(math.acos(max(-1.0, min(1.0, float(approach @ down)))))
         twist = math.degrees(math.acos(max(-1.0, min(1.0, abs(float(finger @ across))))))
         return err, tilt, twist
@@ -364,7 +379,7 @@ def main() -> None:
                 hits.append(name)
         return hits
 
-    def reach(side, goal, seconds=None, orient=False):
+    def reach(side, goal, seconds=None, orient=False, retries=1):
         """Closed-loop DLS IK on the fingertip midpoint with a measured, Broyden-updated Jacobian.
 
         The analytic Jacobian is for the gripper body, not the fingertips, and even the best
@@ -411,6 +426,23 @@ def main() -> None:
         step(30)  # let the drives settle on the last target
         error = goal_t - tip_mid(side)
         residual = float(torch.linalg.norm(error))
+        if residual > args.tolerance_m and retries > 0:
+            # The Jacobian measured at home is a poor start far from home: the right arm stopped
+            # 39.5 mm off battery_a with its orientation met (be1f60b). Re-measure it here and go
+            # again, then restore the home one so later reaches start as before.
+            saved_jac, saved_layout = measured_jac.get(side), layout[side]
+            try:
+                calibrate(side, delta=0.02)
+                again = reach(side, goal, seconds, orient, retries - 1)
+            finally:
+                layout[side] = saved_layout
+                if saved_jac is None:
+                    measured_jac.pop(side, None)
+                else:
+                    measured_jac[side] = saved_jac
+            again["first_attempt_residual_mm"] = round(1000 * residual, 2)
+            again["recalibrated_at_pose"] = True
+            return again
         return {
             "goal": [round(v, 4) for v in goal],
             "reached": residual <= args.tolerance_m,
@@ -529,52 +561,174 @@ def main() -> None:
             cell.write_root_velocity_to_sim(torch.zeros((1, 6), device=device))
         step(int(0.3 / dt))
 
+    def grasp(name, side, release=True):
+        """Open, descend on the cell with the fingers across it, close, lift 5 cm. One row."""
+        cell = cells[name]
+        x, y, z = battery_pose(cfg, name).position_xyz
+        finger_cmd[side] = cfg.robot.finger_open_m
+        above = reach(side, (x, y, z + args.approach_m), orient=True)
+        at = reach(side, (x, y, z), orient=True)
+        boxes = _stage({}, "boxes", lambda: grasp_geometry(side, name))
+        finger_cmd[side] = cfg.robot.finger_closed_m
+        step(int(1.0 / dt))
+        fingers = [round(float(_tensor(robots[side].data.joint_pos)[0, j]), 4) for j in arm[side]["fingers"]]
+        pads_after = pad_centres(side)
+        pad_gap_mm = round(1000 * float(torch.linalg.norm(pads_after[0] - pads_after[1])), 1)
+        start_z = float(_tensor(cell.data.root_pos_w)[0, 2])
+        reach(side, (x, y, z + 0.05), orient=True)
+        rise = float(_tensor(cell.data.root_pos_w)[0, 2]) - start_z
+        row = {
+            "arm": side,
+            "approach_reached": above["reached"],
+            "grasp_point_reached": at["reached"],
+            "grasp_residual_mm": at["residual_mm"],
+            "first_attempt_residual_mm": at.get("first_attempt_residual_mm"),
+            "joints_at_limit": at["joints_at_limit"],
+            "joint_pos_rad": at["joint_pos_rad"],
+            "finger_pos_after_close_m": fingers,
+            "fingers_stopped_by_cell": all(abs(f - cfg.robot.finger_closed_m) > 0.002 for f in fingers),
+            "cell_rise_mm": round(1000 * rise, 1),
+            "lifted": rise > 0.03,
+            "gripper_axes_at_grasp": at["gripper_axes_world"],
+            "before_close": boxes,
+            "pad_gap_after_close_mm": pad_gap_mm,
+            "cell_diameter_mm": round(1000 * cfg.battery.diameter_m, 1),
+            "approach_tilt_from_down_deg": at["approach_tilt_from_down_deg"],
+            "finger_axis_off_world_y_deg": at["finger_axis_off_world_y_deg"],
+        }
+        if release:
+            finger_cmd[side] = cfg.robot.finger_open_m
+            step(int(0.5 / dt))
+            home(side)
+        return row
+
+    def mirrored_seed(side):
+        """Start from home with joint1 negated. Both arms share one home (0.4 rad yaw), so the
+        right arm starts turned away from its cell; the left arm, which lifted its cell, starts
+        turned toward it."""
+        home(side)
+        j1 = arm[side]["joints"][0]
+        targets[side][0, j1] = -targets[side][0, j1]
+        step(int(1.5 / dt))
+
     def grasp_cells():
         rows = {}
-        for name, cell in cells.items():
-            pose = battery_pose(cfg, name)
-            x, y, z = pose.position_xyz
+        for name in cells:
+            x, y, _ = battery_pose(cfg, name).position_xyz
             side = nearer_arm((x, y))
             # The reach stages knocked battery_b ~100 mm off its mat (cc2d125); start each grasp
             # with both cells back on their marks.
             reset_cells()
-            finger_cmd[side] = cfg.robot.finger_open_m
-            above = reach(side, (x, y, z + args.approach_m), orient=True)
-            at = reach(side, (x, y, z), orient=True)
-            boxes = _stage({}, "boxes", lambda: grasp_geometry(side, name))
-            finger_cmd[side] = cfg.robot.finger_closed_m
-            step(int(1.0 / dt))
-            fingers = [round(float(_tensor(robots[side].data.joint_pos)[0, j]), 4) for j in arm[side]["fingers"]]
-            pads_after = pad_centres(side)
-            pad_gap_mm = round(1000 * float(torch.linalg.norm(pads_after[0] - pads_after[1])), 1)
-            start_z = float(_tensor(cell.data.root_pos_w)[0, 2])
-            lift = reach(side, (x, y, z + 0.05), orient=True)
-            end = _tensor(cell.data.root_pos_w)[0].cpu().tolist()
-            rise = end[2] - start_z
-            rows[name] = {
-                "arm": side,
-                "approach_reached": above["reached"],
-                "grasp_point_reached": at["reached"],
-                "grasp_residual_mm": at["residual_mm"],
-                "finger_pos_after_close_m": fingers,
-                "fingers_stopped_by_cell": all(abs(f - cfg.robot.finger_closed_m) > 0.002 for f in fingers),
-                "cell_rise_mm": round(1000 * rise, 1),
-                "lifted": rise > 0.03,
-                "gripper_axes_at_grasp": at["gripper_axes_world"],
-                "before_close": boxes,
-                "pad_gap_after_close_mm": pad_gap_mm,
-                "cell_diameter_mm": round(1000 * cfg.battery.diameter_m, 1),
-                "approach_tilt_from_down_deg": at["approach_tilt_from_down_deg"],
-                "finger_axis_off_world_y_deg": at["finger_axis_off_world_y_deg"],
+            row = grasp(name, side)
+            if not row["lifted"]:
+                reset_cells()
+                mirrored_seed(side)
+                row["from_mirrored_seed"] = _stage({}, "row", lambda: grasp(name, side))
+            rows[name] = row
+        return rows
+
+    def cell_axis(name):
+        """World centre and unit +Z axis (positive terminal) of a cell."""
+        quat = _tensor(cells[name].data.root_quat_w)[0].tolist()
+        return _tensor(cells[name].data.root_pos_w)[0].clone(), quat_to_rot(quat)[:, 2]
+
+    def insert_cell():
+        """Pick a cell with the arm that lifted it, dip its negative end into the slot against the
+        spring, push the plunger in, let go so the cell drops level and the spring seats it.
+
+        A level drop does not fit: the bay at rest is 1.5 mm shorter than a cell (spring
+        preload), and the fingers cannot follow the cell below the rim (13 mm channel for a
+        10.5 mm cell). So tilt the cell about the finger axis, steer its low end, and release
+        above the rim. The low end is steered from the live cell pose, so the cell's offset in
+        the hand does not matter.
+        """
+        rows = {}
+        lifted = report.get("grasp_cells", {})
+        order = [n for n in cells if isinstance(lifted.get(n), dict) and lifted[n].get("lifted")] or list(cells)
+        name = order[0]
+        side = nearer_arm(battery_pose(cfg, name).position_xyz[:2])
+        rpos, rquat = cfg.remote_pose.position_xyz, cfg.remote_pose.rotation_xyzw
+        # Cells start positive end toward +X, so pick the slot that wants +X: no 180 deg turn.
+        slot = next((s for s in active_slots(cfg) if s.required_axis_xyz[0] > 0), active_slots(cfg)[0])
+        side_sign = spring_side(slot)  # +1 when the spring is at the slot's +X end
+        joint = int(remote.find_joints(f"^{plunger_joint_name(slot)}$")[0][0])
+        half = cfg.battery.length_m / 2.0
+        axis_z = rest_center_z(cfg)
+        seat_x = cfg.compartment.seat_center_x
+        rows.update({"cell": name, "arm": side, "slot": slot.name, "spring_side": side_sign})
+
+        def plunger_mm():
+            return round(1000 * float(_tensor(remote.data.joint_pos)[0, joint]), 3)
+
+        def low_end():
+            centre, axis = cell_axis(name)
+            # The spring end is the negative terminal: -axis from the centre.
+            return centre - half * axis
+
+        def cell_tilt_deg():
+            _, axis = cell_axis(name)
+            return round(math.degrees(math.asin(max(-1.0, min(1.0, float(axis[2]))))), 1)
+
+        def move_low_end(local, passes=2, **kw):
+            goal = torch.tensor(local_to_world(rpos, rquat, local), device=device, dtype=torch.float32)
+            row = None
+            for _ in range(passes):  # steer the tips by the low end's measured error
+                tip_goal = tip_mid(side) + (goal - low_end())
+                row = reach(side, tuple(float(v) for v in tip_goal), orient=True, retries=0, **kw)
+            err = goal - low_end()
+            return {
+                "low_end_error_mm": [round(1000 * float(v), 1) for v in err],
+                "tip_residual_mm": row["residual_mm"],
+                "approach_tilt_from_goal_deg": row["approach_tilt_from_down_deg"],
+                "cell_tilt_deg": cell_tilt_deg(),
+                "plunger_compression_mm": plunger_mm(),
+                "joints_at_limit": row["joints_at_limit"],
             }
-            finger_cmd[side] = cfg.robot.finger_open_m
-            step(int(0.5 / dt))
-            home(side)
+
+        reset_cells()
+        rows["grasp"] = grasp(name, side, release=False)
+        # Positive tilt about Y lowers +X; lower the spring end, which is at side_sign * X.
+        orient_goal.update(tilt_y_deg=side_sign * args.insert_tilt_deg, approach_weight=1.0)
+        try:
+            end_x = seat_x + side_sign * (half - 0.0025)  # 1 mm short of the resting plunger face
+            push_x = seat_x + side_sign * (half + 0.0020)  # plunger in 3.5 of its 4 mm
+            rows["tilt_above"] = move_low_end((end_x, slot.center_y_m, axis_z + 0.03))
+            rows["dip"] = move_low_end((end_x, slot.center_y_m, axis_z + 0.001))
+            rows["push"] = move_low_end((push_x, slot.center_y_m, axis_z + 0.001))
+        finally:
+            orient_goal.update(tilt_y_deg=0.0, approach_weight=0.3)
+        finger_cmd[side] = cfg.robot.finger_open_m
+        step(int(1.0 / dt))
+        tips = tip_mid(side)
+        reach(side, (float(tips[0]), float(tips[1]), float(tips[2]) + 0.05), orient=True, retries=0)
+        home(side)
+        step(int(args.hold_s / dt))
+        position = tuple(_tensor(cells[name].data.root_pos_w)[0].tolist())
+        rotation = tuple(_tensor(cells[name].data.root_quat_w)[0].tolist())
+        measured = measure_battery(cfg, slot, position, rotation, rpos, rquat, plunger_joint_m=plunger_mm() / 1000.0)
+        speed = float(torch.linalg.norm(_tensor(cells[name].data.root_lin_vel_w)[0]))
+        rows["after_release"] = {
+            "axial_offset_mm": round(1000 * measured.axial_offset_m, 2),
+            "radial_offset_mm": round(1000 * measured.radial_offset_m, 2),
+            "polarity_angle_deg": round(measured.polarity_angle_deg, 1),
+            "spring_contact": measured.spring_contact,
+            "plunger_compression_mm": plunger_mm(),
+            "speed_mm_s": round(1000 * speed, 2),
+            "cell_tilt_deg": cell_tilt_deg(),
+            # The scorer's seated test, as in tools/physics_check.py.
+            "seated": bool(
+                abs(measured.axial_offset_m) <= cfg.scoring.axial_tolerance_m
+                and measured.radial_offset_m <= cfg.scoring.seat_radial_max_m
+                and measured.spring_contact is True
+                and measured.polarity_angle_deg <= cfg.scoring.polarity_angle_deg
+            ),
+        }
         return rows
 
     _stage(report, "reach_cells", reach_cells)
     _stage(report, "reach_slots", reach_slots)
     _stage(report, "grasp_cells", grasp_cells)
+    _stage(report, "insert_cell", insert_cell)
 
     (out / "report.json").write_text(json.dumps(report, indent=1, default=str) + "\n")
     print("ROBOCURVE_REACH_CHECK_BEGIN")
