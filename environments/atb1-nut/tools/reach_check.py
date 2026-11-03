@@ -393,12 +393,32 @@ def main() -> None:
         """Angular rows of the analytic Jacobian: the same for every point on the gripper."""
         return jacobian_variant(side, *layout[side], rows=slice(3, 6))
 
+    analytic = {}
+
+    def lever_jacobian(side, body_shift, col_shift):
+        """Fingertip-point Jacobian from the gripper body's: v_tip = v_body + w x r.
+
+        The 27% mismatch (2c545c3) compared the body's linear rows with the tips' motion and
+        left out this lever, r ~ 0.2 m from the gripper origin to the pads. Recomputed every
+        step, it needs no nudging calibration and no Broyden updates.
+        """
+        jac = torch_array(view_of(side).get_jacobians())
+        body = arm[side]["gripper"] - body_shift
+        cols = [j + col_shift for j in arm[side]["joints"]]
+        if not (0 <= body < jac.shape[1]) or max(cols) >= jac.shape[3]:
+            return None
+        block = jac[0, body][:, torch.tensor(cols, device=jac.device)]
+        r = [float(v) for v in tip_mid(side) - _tensor(robots[side].data.body_pos_w)[0, arm[side]["gripper"]]]
+        skew = torch.tensor([[0.0, -r[2], r[1]], [r[2], 0.0, -r[0]], [-r[1], r[0], 0.0]], device=block.device)
+        return block[:3] - skew @ block[3:6]
+
     def calibrate(side, delta=0.05):
         """Measure d(tip)/d(joint) by nudging each arm joint, then pick the matching layout."""
         base_targets = targets[side].clone()
         step(int(0.5 / dt))
         p0 = tip_mid(side).clone()
         variants = {(b, c): jacobian_variant(side, b, c) for b in (0, 1) for c in (0, 6)}
+        lever_variants = {(b, c): lever_jacobian(side, b, c) for b in (0, 1) for c in (0, 6)}
         measured = []
         for j in arm[side]["joints"]:
             targets[side][0, j] = base_targets[0, j] + delta
@@ -415,6 +435,21 @@ def main() -> None:
         valid = {k: v for k, v in scores.items() if v is not None}
         best = min(valid, key=valid.get)
         layout[side] = (int(best.split("_")[0].split("-")[1]), int(best.split("+")[1]))
+        lever_scores = {}
+        for key, jac in lever_variants.items():
+            name = f"lever_body-{key[0]}_cols+{key[1]}"
+            lever_scores[name] = None if jac is None else round(float(torch.linalg.norm(jac.to(measured.device) - measured) / max(float(torch.linalg.norm(measured)), 1e-9)), 3)
+        lever_valid = {k: v for k, v in lever_scores.items() if v is not None}
+        scores.update(lever_scores)
+        analytic.pop(side, None)
+        if lever_valid:
+            lever_best = min(lever_valid, key=lever_valid.get)
+            # Drive sag under load makes the measured columns a little short; 25% still means
+            # the same Jacobian, while a wrong layout is off by ~100%.
+            if lever_valid[lever_best] < 0.25:
+                key = (int(lever_best.split("_")[1].split("-")[1]), int(lever_best.split("+")[1]))
+                analytic[side] = layout[side] = key
+                best = lever_best
         return {"relative_error_by_layout": scores, "chosen": best}
 
     def gripper_rotation(side):
@@ -505,7 +540,8 @@ def main() -> None:
             side = self.side
             free = list(free)
             error = goal_t - tip_mid(side)
-            jac = self.jac[:, free]
+            base = lever_jacobian(side, *analytic[side]) if side in analytic else self.jac
+            jac = base[:, free]
             if orient:
                 rot_err, _, _ = orientation_error(side, across)
                 full_jac = torch.cat([jac, 0.05 * angular_jacobian(side)[:, free]], dim=0)  # 5 cm per rad
@@ -547,6 +583,7 @@ def main() -> None:
         residual = float(torch.linalg.norm(goal_t - tip_mid(side)))
         _, tilt, twist = orientation_error(side, across)
         return {
+            "jacobian": "analytic_lever" if side in analytic else "measured_broyden",
             "goal_mm": [round(1000 * float(v), 1) for v in goal],
             "reached": residual <= args.tolerance_m,
             "start_residual_mm": round(1000 * start_residual, 2),

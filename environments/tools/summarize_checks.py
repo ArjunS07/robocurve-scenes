@@ -32,6 +32,8 @@ def battery() -> None:
         return
     print(path)
     r = json.load(open(path))
+    print("calibration", {s: (v.get("chosen"), {k: x for k, x in (v.get("relative_error_by_layout") or {}).items() if x is not None and x < 0.6})
+                          for s, v in r.get("jacobian_calibration", {}).items() if isinstance(v, dict)})
     keys = ("arm", "grasp_residual_mm", "first_attempt_residual_mm", "joints_at_limit",
             "pad_gap_after_close_mm", "cell_rise_mm", "lifted")
     for name, row in r.get("grasp_cells", {}).items():
@@ -58,6 +60,8 @@ def nut() -> None:
         return
     print(path)
     r = json.load(open(path))
+    print("calibration", {s: (v.get("chosen"), {k: x for k, x in (v.get("relative_error_by_layout") or {}).items() if x is not None and x < 0.6})
+                          for s, v in r.get("jacobian_calibration", {}).items() if isinstance(v, dict)})
     g = r.get("grasp", {})
     print("grasp", pick(g, ("error", "error_at", "pad_gap_after_close_mm", "finger_open_fraction",
                             "holding_by_env_rule", "nut_rise_mm", "lifted", "nut_tilt_deg")),
