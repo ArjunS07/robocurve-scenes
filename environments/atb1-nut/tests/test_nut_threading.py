@@ -348,6 +348,22 @@ class ScoringTests(unittest.TestCase):
         self.assertEqual(report.score, 100)
         self.assertNotIn("cross_threaded", report.hard_reasons)
 
+    def test_lead_in_drop_and_free_spin_still_threads(self):
+        """What the server showed on the Factory M16: the nut drops ~2.45 mm onto the first full
+        crest without turning, spins ~0.4 turn before the thread catches, then screws down at the
+        pitch. That is correct threading, not cross-threading, and seats for 100."""
+        drop = 0.00245
+        start = self.travel - drop
+        frames = [(0.05, 0.0, True), (self.travel, 0.0, True), (start, 0.0, True)]
+        frames += self._spin(start, 0.0, 0.4)
+        # From here every turn descends one pitch until the seat.
+        remaining = int(round((start / self.pitch) / 0.1))
+        frames += [(start - (i * 0.1) * self.pitch, 0.4 + i * 0.1, True) for i in range(1, remaining + 1)]
+        frames += [(0.0, 0.4 + remaining * 0.1, True), (0.0, 0.4 + remaining * 0.1, False)]
+        report = self._run(frames)
+        self.assertNotIn("cross_threaded", report.hard_reasons)
+        self.assertEqual(report.score, 100)
+
     def test_drop_to_seat_then_spin_is_cross_threaded(self):
         turns = turns_to_seat(self.cfg)
         frames = [(0.05, 0.0, True), (self.travel, 0.0, True), (0.0, 0.0, True)]

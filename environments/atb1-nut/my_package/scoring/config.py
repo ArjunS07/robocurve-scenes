@@ -100,6 +100,9 @@ class ScoringSpec:
     track_tilt_deg: float
     min_engagement_turns: float
     turn_tolerance: float
+    # Top of the exposed thread where the nut spins or drops onto the first full crest without
+    # the thread holding it (chamfered tip): turns are re-anchored to the descent here.
+    thread_lead_in_m: float
     seat_gap_m: float
     deep_fraction: float
 
@@ -311,6 +314,7 @@ def parse_config(data: dict) -> NutThreadingConfig:
             "track_tilt_deg",
             "min_engagement_turns",
             "turn_tolerance",
+            "thread_lead_in_m",
             "seat_gap_m",
             "deep_fraction",
         ),
@@ -405,6 +409,7 @@ def parse_config(data: dict) -> NutThreadingConfig:
             track_tilt_deg=_number(scoring_data["track_tilt_deg"], "scoring.track_tilt_deg"),
             min_engagement_turns=_number(scoring_data["min_engagement_turns"], "scoring.min_engagement_turns"),
             turn_tolerance=_number(scoring_data["turn_tolerance"], "scoring.turn_tolerance"),
+            thread_lead_in_m=_number(scoring_data["thread_lead_in_m"], "scoring.thread_lead_in_m"),
             seat_gap_m=_number(scoring_data["seat_gap_m"], "scoring.seat_gap_m"),
             deep_fraction=_number(scoring_data["deep_fraction"], "scoring.deep_fraction"),
         ),
@@ -544,6 +549,8 @@ def validate_config(config: NutThreadingConfig) -> None:
     _close(config.scoring.seat_gap_m, 0.001, "scoring.seat_gap_m")
     _close(config.scoring.min_engagement_turns, 0.5, "scoring.min_engagement_turns")
     _close(config.scoring.turn_tolerance, 0.5, "scoring.turn_tolerance")
+    if not 0.0 <= config.scoring.thread_lead_in_m <= 2.0 * config.fastener.pitch_m:
+        raise ValueError("thread_lead_in_m must be between 0 and two pitches")
     if config.robot.layout not in {"duplicated_single_arm", "combined"}:
         raise ValueError(f"unknown robot layout {config.robot.layout}")
     if not config.robot.usd_path.endswith(".usda"):

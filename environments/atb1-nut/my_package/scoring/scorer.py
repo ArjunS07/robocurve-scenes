@@ -130,9 +130,10 @@ def measure(cfg: NutThreadingConfig, snapshot: SceneSnapshot) -> tuple[NutSnapsh
             # Right-hand thread: clockwise when viewed from above screws the nut down.
             turns += -_unwrap(yaw - prev) / (2.0 * math.pi)
         prev = yaw
-        if gap >= travel:
-            # Above the first thread. Spinning here does not advance the nut.
-            turns, cross = 0.0, False
+        if gap >= travel - scoring.thread_lead_in_m:
+            # Above the first full crest (or on the chamfered lead-in): spinning or dropping here
+            # does not engage the thread, so re-anchor the turn count to the descent.
+            turns, cross = max(expected, 0.0), False
         elif abs(turns - expected) > scoring.turn_tolerance:
             # Dropped faster than it turned, or turned without descending.
             cross = True

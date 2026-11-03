@@ -77,6 +77,11 @@ scoring:
   track_tilt_deg: 20.0
   min_engagement_turns: 0.5
   turn_tolerance: 0.5
+  # Server run at 550ecb1: the nut dropped 2.45 mm onto the first full crest without turning
+  # (chamfered bolt tip) and then spun ~0.4 turn before the thread caught, so a correctly
+  # threaded nut was flagged cross-threaded and the seat scored 25. Inside this top band the
+  # turn count follows the descent; the consistency check starts below it.
+  thread_lead_in_m: 0.0025
   seat_gap_m: 0.001
   deep_fraction: 0.75
 

@@ -1,5 +1,13 @@
 # Status
 
+## Factory M16: first server results (physics_check at 4c31305/550ecb1, scripted torque, no robot)
+
+- Torque sweep: 0.01 N m free tracks the helix (0.07 mm) but does not finish 3 turns; **0.05 N m free and 0.01–0.05 N m held upright complete 3 turns** within ~0.9 mm of the helix (5.7° max tilt free, 0 held); 0.2 and 0.5 N m throw the nut off, free or held. That is ~25x the torque the old box thread survived (2 mN m).
+- Released mid-thread the nut is **retained**; backed off it unscrews **free**.
+- The mesh pitch is 2.000 mm (crest spacing measured from the collision mesh; right-hand). The sweep's 1.721 mm/turn average comes from the lead-in: the nut dropped 2.45 mm onto the first full crest without turning and spun ~0.4 turn before the thread caught.
+- That lead-in made the scorer flag correct threading as cross-threaded, so the seated nut scored 25. Fixed: `scoring.thread_lead_in_m` (2.5 mm) re-anchors the turn count to the descent in the top band; a regression test reproduces the server sequence and fails without the fix. **Not yet re-run on the server.**
+- Not yet tested: a robot grasping, placing and turning the nut; above 0.05–0.2 N m the scripted drive still throws the nut.
+
 ## What this scene is
 
 An M16 nut-and-bolt station inspired by NIST ATB1, using Isaac Lab's Factory M16 assets (NVIDIA, loaded at runtime). It is not the full ATB1 board, and it is not built from the NIST CAD. The language instruction is only "Tighten the nut onto the bolt." The 120 s limit and the 100 / 75 / 50 / 25 / 0 tiers live in the scorer.
