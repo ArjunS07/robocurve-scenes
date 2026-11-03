@@ -25,6 +25,19 @@ Measured on the server:
 - `tools/reach_check.py` at be1f60b, the real YAM arm under scripted IK: the left arm brought its fingertips within 2.1 mm of battery_b with the gripper 3° from vertical and the fingers across the cell, closed on it (pad gap 29.1 mm vs 24.0 mm closed on nothing) and **lifted it 64 mm**. The right arm's grasp of battery_a ended 39.5 mm off and did not lift.
 - `launch_battery_insertion.py`: the Arena runner completes 50 zero-action steps with no false failure.
 
-## Chess and nut
+## Nut threading (`environments/atb1-nut`)
 
-Chess renders (board, pieces, colliders) were reviewed during development (`tools/render_check.py`) and will be added here from the next server run. The nut scene is being switched to Isaac Lab's Factory M16 nut and bolt; its images will follow that change.
+**These images show the earlier design, which has since been replaced.** They are the approximate-M8 station with a box-chain thread: a helical ridge of collision boxes on the stud (yellow) and a small hex nut with three pins. The scene now uses Isaac Lab's Factory M16 nut and bolt (commit 13cca68), which has not been rendered yet.
+
+![Earlier M8 station: fixture, threaded stud, nut on the table](images/atb1-nut/overview.png)
+![Earlier M8 stud: the helical box ridge](images/atb1-nut/close_up.png)
+![Earlier M8 colliders](images/atb1-nut/collision_overview.png)
+![Earlier M8 colliders, close](images/atb1-nut/collision_close_up.png)
+
+The "mid-thread" overview shows the nut back on the table rather than on the stud. Either the render showed stale poses (seen elsewhere with Fabric on), or the nut had left the stud by that point in the run.
+
+Measured on the server with that design (scripted torque on the nut, no robot): at 2 mN m it threaded 3 turns at 1.248 mm/turn against the 1.25 mm pitch, stayed put when released, held against a pull, scored 100 when seated and released, and backed off free. At 5–50 mN m it skipped turns or was thrown off the stud, which is why the scene moved to the Factory M16 assets.
+
+## Chess
+
+Chess renders (board, pieces, colliders) were reviewed during development (`tools/render_check.py`); see `environments/chess-mate/STATUS.md`.
