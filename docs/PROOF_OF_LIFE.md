@@ -27,16 +27,19 @@ Measured on the server:
 
 ## Nut threading (`environments/atb1-nut`)
 
-**These images show the earlier design, which has since been replaced.** They are the approximate-M8 station with a box-chain thread: a helical ridge of collision boxes on the stud (yellow) and a small hex nut with three pins. The scene now uses Isaac Lab's Factory M16 nut and bolt (commit 13cca68), which has not been rendered yet.
+The current scene uses Isaac Lab's Factory M16 nut and bolt (NVIDIA assets, loaded at runtime; commit 13cca68). The bolt passes through a clearance hole in a fixture plate, leaving 16 mm of 2.0 mm-pitch thread above the plate (8 turns to seat). The nut starts flat on a mat beside it.
 
-![Earlier M8 station: fixture, threaded stud, nut on the table](images/atb1-nut/overview.png)
-![Earlier M8 stud: the helical box ridge](images/atb1-nut/close_up.png)
-![Earlier M8 colliders](images/atb1-nut/collision_overview.png)
-![Earlier M8 colliders, close](images/atb1-nut/collision_close_up.png)
+![M16 station: fixture plate, bolt, nut on its mat](images/atb1-nut/overview.png)
+![M16 bolt thread above the plate](images/atb1-nut/close_up.png)
+![Fixture colliders: plate and clearance hole](images/atb1-nut/collision_overview.png)
+![Fixture colliders, close](images/atb1-nut/collision_close_up.png)
 
-The "mid-thread" overview shows the nut back on the table rather than on the stud. Either the render showed stale poses (seen elsewhere with Fabric on), or the nut had left the stud by that point in the run.
+Caveats on these renders:
 
-Measured on the server with that design (scripted torque on the nut, no robot): at 2 mN m it threaded 3 turns at 1.248 mm/turn against the 1.25 mm pitch, stayed put when released, held against a pull, scored 100 when seated and released, and backed off free. At 5–50 mN m it skipped turns or was thrown off the stud, which is why the scene moved to the Factory M16 assets.
+- The close-up is captured at the check's mid-thread stage, but the nut is still on its mat. Either the scripted engage did not put the nut on the thread in that run, or the render shows stale poses. The physics report from that run decides which.
+- The collision overlay recolours only the fixture's and the nut's colliders, so the bolt's SDF mesh is not shown there.
+
+The M16 thread has **not yet been shown to work in physics**. The earlier approximate-M8 box-chain thread threaded, held and scored 100 at 2 mN m in scripted trials, but skipped or threw the nut at 5–50 mN m, which is why it was replaced.
 
 ## Chess
 
