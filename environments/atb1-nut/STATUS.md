@@ -6,7 +6,7 @@
 - Released mid-thread the nut is **retained**; backed off it unscrews **free**.
 - The mesh pitch is 2.000 mm (crest spacing measured from the collision mesh; right-hand). The sweep's 1.721 mm/turn average comes from the lead-in: the nut dropped 2.45 mm onto the first full crest without turning and spun ~0.4 turn before the thread caught.
 - That lead-in made the scorer flag correct threading as cross-threaded, so the seated nut scored 25. Fixed: `scoring.thread_lead_in_m` (2.5 mm) re-anchors the turn count to the descent in the top band; a regression test reproduces the server sequence and fails without the fix. **Confirmed on the server at 2915b61: retained on release, seated and released scores 100, backs off free.**
-- Not yet tested: a robot grasping, placing and turning the nut; above 0.05–0.2 N m the scripted drive still throws the nut.
+- Not yet tested: a robot grasping, placing and turning the nut; above 0.05–0.2 N m the scripted drive still throws the nut. `tools/reach_check.py` (written, not yet run on the server) drives the real YAM arm through grasp, carry, lower onto the tip, wrist-turn strokes with regrasps, and release, scoring every step and reporting the joint6 torque against those limits.
 
 ## What this scene is
 
