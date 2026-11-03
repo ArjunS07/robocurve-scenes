@@ -39,7 +39,7 @@ Caveats on these renders:
 - The close-up is captured at the check's mid-thread stage, but the nut is still on its mat. Either the scripted engage did not put the nut on the thread in that run, or the render shows stale poses. The physics report from that run decides which.
 - The collision overlay recolours only the fixture's and the nut's colliders, so the bolt's SDF mesh is not shown there.
 
-The M16 thread has **not yet been shown to work in physics**. The earlier approximate-M8 box-chain thread threaded, held and scored 100 at 2 mN m in scripted trials, but skipped or threw the nut at 5–50 mN m, which is why it was replaced.
+**Measured on the server (scripted torque on the nut, no robot):** at 0.05 N m free, and at 0.01–0.05 N m held upright, the nut threads 3 turns at the 2.0 mm pitch once past the chamfered lead-in. Released mid-thread it stays put, seated and released it **scores 100** (commit 2915b61), and backed off it unscrews free. At 0.2–0.5 N m the scripted drive throws the nut off. A robot has not yet grasped or turned it. The earlier approximate-M8 box-chain thread threaded, held and scored 100 at 2 mN m in scripted trials, but skipped or threw the nut at 5–50 mN m, which is why it was replaced.
 
 ## Chess
 
