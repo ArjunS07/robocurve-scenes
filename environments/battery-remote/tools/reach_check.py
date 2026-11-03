@@ -68,7 +68,7 @@ def main() -> None:
     parser.add_argument("--approach-m", type=float, default=0.08, help="Height above a target for the approach pose.")
     parser.add_argument("--tolerance-m", type=float, default=0.004, help="Fingertip position error that counts as reached.")
     parser.add_argument("--reach-s", type=float, default=4.0, help="Simulated time allowed per target.")
-    parser.add_argument("--grasp-raise-m", type=float, default=0.0015, help="Pinch this far above the cell's axis.")
+    parser.add_argument("--grasp-raise-m", type=float, default=0.0035, help="Pinch this far above the cell's axis.")
     parser.add_argument("--insert-tilt-deg", type=float, default=30.0, help="Cell tilt about the finger axis while dipping its spring end into the slot.")
     parser.add_argument("--hold-s", type=float, default=1.5, help="Settle time after releasing the inserted cell.")
     parser.add_argument("--out", type=Path, default=None)
@@ -613,9 +613,12 @@ def main() -> None:
         cell = cells[name]
         x, y, z = battery_pose(cfg, name).position_xyz
         # The finger ends reach ~6 mm below the contact points, so pads at the cell's axis put
-        # them 0.75 mm into the 1 mm mat: 211e30d's descents jammed there 20-39 mm off in X.
-        # Pinch 1.5 mm above the axis instead: the contact normal is 17 deg off horizontal,
-        # under the friction angle (atan 0.4 = 22 deg), so the cell is not squeezed out.
+        # them into the 1 mm mat. At +1.5 mm (ff38750) the pads arrived 1.2 mm low and both arms'
+        # fingers stalled ~41 mm apart on a 10.5 mm cell (pad-centre gap 18-23 mm; the nut check
+        # reads 1.3 mm on its 24 mm flats), dragging on the mat. Flat vertical finger faces touch a
+        # lying cylinder at its widest line whatever the pinch height, as long as the faces reach
+        # below the axis; +3.5 mm leaves the finger ends ~3 mm over the mat with the axis 2.5 mm
+        # above them.
         z = z + args.grasp_raise_m
         finger_cmd[side] = cfg.robot.finger_open_m
         above = reach(side, (x, y, z + args.approach_m), orient=True)

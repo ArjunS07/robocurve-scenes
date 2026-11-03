@@ -764,7 +764,7 @@ def main() -> None:
             """Free-air reach with the nut held; re-measure the Jacobian here and retry on a miss.
             c9c5606 ended these legs 11-41 mm off with the Jacobian measured over the mat."""
             row = reach(side, goal, across=across)
-            if not row["reached"]:
+            if not row["reached"] and side not in analytic:
                 first = row["residual_mm"]
                 calibrate(side, delta=0.02)
                 row = dict(reach(side, goal, across=across), recalibrated=True, first_residual_mm=first)
@@ -779,6 +779,7 @@ def main() -> None:
                 row = reach(side, tuple(float(v) for v in tip_goal), across=across)
             state = nut_state()
             row["nut_centre_error_mm"] = [round(1000 * (a - b), 1) for a, b in zip(state["centre"], centre_goal)]
+            row["nut_tilt_deg"] = round(state["tilt_deg"], 1)
             return row
 
         now = tip_mid(side)
@@ -793,7 +794,12 @@ def main() -> None:
                 f"tilt {state['tilt_deg']:.1f} deg, rise residual {rise['residual_mm']} mm, high residual {high['residual_mm']} mm, "
                 f"torque at high {high['applied_torque_n_m']} N m"
             )
-        calibrate(side, delta=0.02)  # local Jacobian for the short descent onto the tip
+        # ff38750 left high with the nut 2.1 deg off level and ended the descent at 15.8 deg with
+        # nothing touched: the 0.02 rad calibration nudges jerk the arm, and a two-pad pinch lets
+        # the nut swing about the finger axis. The lever Jacobian is exact everywhere, so only
+        # re-measure without it.
+        if side not in analytic:
+            calibrate(side, delta=0.02)
         above = nut_reach((fx, fy, target_centre_z + 0.02))
         over = nut_reach((fx, fy, target_centre_z))
         state = nut_state()
