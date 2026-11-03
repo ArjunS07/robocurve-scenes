@@ -90,7 +90,9 @@ grasp:
   # Fingers shut on nothing read ~0 open, so the min keeps an empty closed gripper from counting.
   radius_m: 0.055
   hold_open_fraction_min: 0.05
-  hold_open_fraction_max: 0.35
+  # MEASURED (reach_check a5f5537): fingers closed on the 24 mm flats read 0.441 open while
+  # lifting the nut. 0.35 would have counted that real hold as released.
+  hold_open_fraction_max: 0.6
 
 physics:
   # Fixture block colliders.

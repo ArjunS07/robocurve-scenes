@@ -710,12 +710,20 @@ def main() -> None:
             raise RuntimeError("grasp did not lift the nut")
         across = finger_across()  # keep the yaw, level the fingers
         target_centre_z = tip_z + f.nut_height_m / 2.0 + 0.004
-        goal = (fx, fy, target_centre_z + grip["dz"] + 0.03)
-        high = reach(side, goal, across=across)
+        # a5f5537 went straight for a point 3 cm above the tip and ended with the nut tilted 56 deg,
+        # 20 mm off the axis and below the tip level: it struck the bolt on the way. Rise first,
+        # cross at a safe height, then come down on the axis.
+        safe_z = target_centre_z + grip["dz"] + 0.06
+        now = tip_mid(side)
+        rise = reach(side, (float(now[0]), float(now[1]), max(safe_z, float(now[2]))), across=across)
+        high = reach(side, (fx, fy, safe_z), across=across)
+        above = reach(side, (fx, fy, target_centre_z + grip["dz"] + 0.02), across=across)
         over = reach(side, (fx, fy, target_centre_z + grip["dz"]), across=across)
         state = nut_state()
         return {
+            "rise": rise,
             "high": high,
+            "above_tip": above,
             "over_tip": over,
             "nut_radial_mm": round(1000 * state["radial_m"], 2),
             "nut_tilt_deg": round(state["tilt_deg"], 2),

@@ -490,6 +490,16 @@ class ActionAndGraspTests(unittest.TestCase):
         )
         self.assertFalse(is_holding(distance_m=None, open_fraction=0.0, radius_m=0.05, hold_open_fraction_max=0.35))
         self.assertFalse(any_arm_holding([None, None], radius_m=0.05, hold_open_fraction_max=0.35))
+        # A real grip on the 24 mm flats read 0.441 open on the server (a5f5537).
+        self.assertTrue(
+            is_holding(
+                distance_m=0.01,
+                open_fraction=0.441,
+                radius_m=cfg.grasp.radius_m,
+                hold_open_fraction_max=cfg.grasp.hold_open_fraction_max,
+                hold_open_fraction_min=cfg.grasp.hold_open_fraction_min,
+            )
+        )
         # Fingers shut on nothing are not a hold.
         self.assertFalse(
             is_holding(
