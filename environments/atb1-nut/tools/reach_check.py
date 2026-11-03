@@ -532,6 +532,8 @@ def main() -> None:
             self.jac = measured_jac[side].clone()
             self.q_prev = self.q().clone()
             self.p_prev = tip_mid(side).clone()
+            # Slow integral term that holds gravity sag; it starts at whatever offset holds the arm now.
+            self.bias = (targets[side][0, arm[side]["joints"]] - self.q_prev).clone()
 
         def q(self):
             return _tensor(robots[self.side].data.joint_pos)[0, arm[self.side]["joints"]]
@@ -550,15 +552,17 @@ def main() -> None:
                 full_jac, full_err = jac, error
             rows = full_jac.shape[0]
             jjt = full_jac @ full_jac.T + (0.02**2) * torch.eye(rows, device=device)
-            dq = torch.clamp(full_jac.T @ torch.linalg.solve(jjt, full_err), -0.02, 0.02)
+            dq = torch.clamp(full_jac.T @ torch.linalg.solve(jjt, full_err), -0.1, 0.1)
             joints = arm[side]["joints"]
             limits = _tensor(robots[side].data.soft_joint_pos_limits)[0]
             q_now = self.q()
             for k, col in enumerate(free):
                 j = joints[col]
-                # Keep the target within 0.15 rad of the actual joint so it cannot wind up far ahead.
-                new = torch.clamp(targets[side][0, j] + dq[k], q_now[col] - 0.15, q_now[col] + 0.15)
-                targets[side][0, j] = torch.clamp(new, limits[j, 0], limits[j, 1])
+                # Target = actual + this step's correction + a slow integral. Adding the full step to
+                # the previous target each tick oscillated against the drive lag (see battery-remote
+                # reach_check) and left carry legs 17-25 mm off with joint5 pinned at 10 N m (594e24e).
+                self.bias[col] = torch.clamp(self.bias[col] + 0.02 * dq[k], -0.15, 0.15)
+                targets[side][0, j] = torch.clamp(q_now[col] + dq[k] + self.bias[col], limits[j, 0], limits[j, 1])
 
         def observe(self):
             q, p = self.q().clone(), tip_mid(self.side).clone()
@@ -592,6 +596,7 @@ def main() -> None:
             # Drive torque on each arm joint at the end; a value at the effort limit means the
             # joint is saturated and cannot hold its target (sag the IK cannot remove).
             "applied_torque_n_m": [round(float(v), 2) for v in _tensor(robots[side].data.applied_torque)[0, arm[side]["joints"]]],
+            "target_minus_actual_rad": [round(float(targets[side][0, j] - _tensor(robots[side].data.joint_pos)[0, j]), 3) for j in arm[side]["joints"]],
             "approach_tilt_from_down_deg": round(tilt, 1),
             "finger_axis_off_target_deg": None if twist is None else round(twist, 1),
         }

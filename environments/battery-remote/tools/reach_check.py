@@ -432,6 +432,8 @@ def main() -> None:
         start_residual = float(torch.linalg.norm(goal_t - tip_mid(side)))
         q_prev = _tensor(robot.data.joint_pos)[0, joints].clone()
         p_prev = tip_mid(side).clone()
+        # Slow integral term that holds gravity sag; it starts at whatever offset holds the arm now.
+        bias = (targets[side][0, joints] - q_prev).clone()
         for _ in range(steps):
             error = goal_t - tip_mid(side)
             if float(torch.linalg.norm(error)) < args.tolerance_m * 0.5 and (
@@ -445,15 +447,18 @@ def main() -> None:
                 full_jac = torch.cat([jac, 0.05 * angular_jacobian(side)], dim=0)  # 5 cm per rad
                 full_err = torch.cat([error, 0.05 * rot_err])
                 jjt = full_jac @ full_jac.T + (damping**2) * torch.eye(6, device=device)
-                dq = torch.clamp(full_jac.T @ torch.linalg.solve(jjt, full_err), -0.02, 0.02)
+                dq = torch.clamp(full_jac.T @ torch.linalg.solve(jjt, full_err), -0.1, 0.1)
             else:
                 jjt = jac @ jac.T + (damping**2) * torch.eye(3, device=device)
-                dq = torch.clamp(jac.T @ torch.linalg.solve(jjt, error), -0.02, 0.02)
+                dq = torch.clamp(jac.T @ torch.linalg.solve(jjt, error), -0.1, 0.1)
             q_now = _tensor(robot.data.joint_pos)[0, joints]
+            # Target = actual + this step's correction + a slow integral. Adding the full step to the
+            # previous target each tick was an integrator with gain 1 per 8 ms tick against drives
+            # that lag ~0.1 s, so it oscillated inside its 0.15 rad window and stopped 9-39 mm off
+            # wherever the clock ran out (594e24e), with no joint at a limit.
+            bias = torch.clamp(bias + 0.02 * dq, -0.15, 0.15)
             for k, j in enumerate(joints):
-                # Keep the target within 0.15 rad of the actual joint so it cannot wind up far ahead.
-                new = torch.clamp(targets[side][0, j] + dq[k], q_now[k] - 0.15, q_now[k] + 0.15)
-                targets[side][0, j] = torch.clamp(new, limits[j, 0], limits[j, 1])
+                targets[side][0, j] = torch.clamp(q_now[k] + dq[k] + bias[k], limits[j, 0], limits[j, 1])
             step()
             q = _tensor(robot.data.joint_pos)[0, joints].clone()
             p = tip_mid(side).clone()
@@ -653,6 +658,8 @@ def main() -> None:
             "joints_at_limit": at["joints_at_limit"],
             "joint_pos_rad": at["joint_pos_rad"],
             "applied_torque_n_m": at["applied_torque_n_m"],
+            "target_minus_actual_rad": at["target_minus_actual_rad"],
+            "approach": {k: above.get(k) for k in ("reached", "residual_mm", "target_minus_actual_rad")},
             "finger_pos_after_close_m": fingers,
             "fingers_stopped_by_cell": all(abs(f - cfg.robot.finger_closed_m) > 0.002 for f in fingers),
             "cell_rise_mm": round(1000 * rise, 1),

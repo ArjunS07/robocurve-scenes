@@ -43,7 +43,8 @@ def battery() -> None:
         print("grasp", name, pick(row, keys + ("approach_tilt_from_down_deg", "finger_axis_off_world_y_deg", "fingers_stopped_by_cell")))
         print("   before_close", row.get("before_close"))
         print("   after_close", row.get("after_close"), "lift", row.get("lift"), "cell_after_lift", row.get("cell_after_lift_mm"))
-        print("   torque at grasp point", row.get("applied_torque_n_m"))
+        print("   torque at grasp point", row.get("applied_torque_n_m"), "target-actual rad", row.get("target_minus_actual_rad"))
+        print("   approach (8 cm above)", row.get("approach"))
         mirrored = row.get("from_mirrored_seed")
         if mirrored:
             print("   mirrored:", mirrored if "error" in mirrored else pick(mirrored, keys))
@@ -71,6 +72,9 @@ def nut() -> None:
     print("carry", pick(c, ("error", "nut_radial_mm", "nut_tilt_deg", "nut_gap_mm", "held")),
           {k: pick(c.get(k) or {}, ("residual_mm", "first_residual_mm", "nut_centre_error_mm", "nut_tilt_deg"))
            for k in ("rise", "high", "above_tip", "over_tip")})
+    for k in ("rise", "high", "above_tip", "over_tip"):
+        if (c.get(k) or {}).get("applied_torque_n_m"):
+            print("  ", k, "torque", c[k]["applied_torque_n_m"], "target-actual rad", c[k].get("target_minus_actual_rad"))
     print("lower", pick(r.get("lower", {}), ("error", "nut_gap_mm", "travel_mm", "rests_on_tip", "nut_radial_mm", "nut_tilt_deg")))
     t = r.get("turn", {})
     print("turn", pick(t, ("error", "error_at", "stop", "strokes_run", "nut_turns", "descent_mm", "descent_per_turn_mm",
